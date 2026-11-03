@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, seatingPlan, seatPlayers, normalizeGame, addonsRemaining, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
@@ -212,43 +212,92 @@ test('undoing reentry returns a reopened tournament to its settled result',()=>{
   assert.deepEqual(restored.events,snapshot.events);
 });
 
-test('one addon per player by default, and undo makes it available again',()=>{
-  const g=game({bountyMode:'fixed'}), before=structuredClone(g);
-  addEntry(g,'1','addon',10);
-  assert.equal(addonsRemaining(g,g.players[0]),0);
-  const after=structuredClone(g);
-  assert.throws(()=>addEntry(g,'1','addon',20),/Лимит/);
-  assert.deepEqual(g,after);
+test('addons have no quantity limit and each contributes fully to prizes',()=>{
+  const g=game({bountyMode:'fixed',addonLimit:1});
+  for(let i=0;i<8;i++)addEntry(g,'1','addon',i);
+  assert.equal(g.players[0].addons,8);assert.equal(poolOf(g),6400);
+  assert.equal(g.players[0].bounty,200);assertBankBalances(g);
+  const before=structuredClone(g);addEntry(g,'1','addon',20);
   const restored=restoreAction(g,before,30);
-  assert.equal(addonsRemaining(restored,restored.players[0]),1);
-  addEntry(restored,'1','addon',40);assertBankBalances(restored);
+  assert.equal(restored.players[0].addons,8);assert.equal(poolOf(restored),6400);
 });
-test('configured addon limit applies across reentries, while inactive players cannot addon',()=>{
-  const g=game({bountyMode:'fixed',addonLimit:3});
-  for(let i=0;i<3;i++)addEntry(g,'1','addon',i);
-  assert.equal(g.players[0].addons,3);
-  eliminate(g,'1',10,'2');
+test('addons remain available after reentry but not while the player is out',()=>{
+  const g=game({bountyMode:'fixed'});
+  addEntry(g,'1','addon',0);eliminate(g,'1',10,'2');
   assert.throws(()=>addEntry(g,'1','addon',20));
-  addEntry(g,'1','reentry',30);
-  assert.equal(addonsRemaining(g,g.players[0]),0);
-  assert.throws(()=>addEntry(g,'1','addon',40),/Лимит/);
-  assertBankBalances(g);
+  addEntry(g,'1','reentry',30);addEntry(g,'1','addon',40);
+  assert.equal(g.players[0].addons,2);assertBankBalances(g);
 });
-test('legacy games retain historical purchases and money when addon limits are added',()=>{
-  const g=game();delete g.config.addonLimit;
+test('removing old addon limits preserves recorded purchases, money and undo snapshots',()=>{
+  const g=game({addonLimit:1});delete g.freezeout;
   Object.assign(g.players[0],{rebuys:2,addons:2,entries:3,invested:4000,mainContribution:4000});
   g.events.push({type:'rebuy',playerId:'1',amount:1000,at:0});
   const oldPlayers=structuredClone(g.players),oldEvents=structuredClone(g.events),oldPool=poolOf(g);
   normalizeGame(g);
-  assert.equal(g.config.addonLimit,1);
+  assert.equal(g.config.addonLimit,undefined);assert.equal(g.freezeout,null);
   assert.deepEqual(g.players,oldPlayers);assert.deepEqual(g.events,oldEvents);assert.equal(poolOf(g),oldPool);
-  assert.equal(addonsRemaining(g,g.players[0]),0);
-  const snapshot=structuredClone(g);delete snapshot.config.addonLimit;
-  assert.equal(restoreAction(g,snapshot).config.addonLimit,1);
+  const snapshot=structuredClone(g);snapshot.config.addonLimit=1;
+  assert.equal(restoreAction(g,snapshot).config.addonLimit,undefined);
+  addEntry(g,'1','addon');assert.equal(g.players[0].addons,3);
 });
-test('addon limit must be between one and three',()=>{
-  assert.throws(()=>recommendStructure(defaults(),{addons:7}),/лимит/);
-  assert.equal(recommendStructure({...defaults(),addonLimit:3},{addons:18}).chips,150000);
-  for(const addonLimit of [0,4,1.5,NaN]) assert.notEqual(validateConfig({...defaults(),addonLimit}),'');
-  for(const addonLimit of [1,2,3]) assert.equal(validateConfig({...defaults(),addonLimit}),'');
+test('smart structure accepts multiple addons for every player',()=>{
+  assert.equal(recommendStructure(defaults(),{addons:18}).chips,150000);
+  assert.equal(recommendStructure({...defaults(),addonLimit:1},{addons:18}).chips,150000);
+});
+test('freezeout restarts the current level and preserves entries, players and funds',()=>{
+  const g=game({bountyMode:'fixed'});jumpLevel(g,2,0);g.remaining=90;
+  const before=structuredClone(g);
+  assert.equal(startFreezeout(g,1000),true);
+  assert.equal(g.index,2);assert.equal(g.remaining,1200);assert.equal(g.deadline,1201000);
+  assert.equal(g.running,true);assert.equal(g.elapsed,0);assert.equal(g.freezeout.level,3);
+  assert.deepEqual(g.players,before.players);assert.deepEqual(g.config,before.config);assertBankBalances(g);
+  assert.equal(g.events.at(-1).type,'freezeout');
+  const saved=normalizeGame(JSON.parse(JSON.stringify(g)));
+  assert.deepEqual(saved.freezeout,g.freezeout);assert.equal(saved.config.reentry,true);
+  const started=structuredClone(g);
+  assert.equal(startFreezeout(g,2000),false);assert.deepEqual(g,started);
+});
+test('freezeout skips a break and starts the next playable level',()=>{
+  const g=game();jumpLevel(g,4,0);
+  assert.equal(g.levels[g.index].kind,'break');
+  startFreezeout(g,1000);
+  assert.equal(g.index,5);assert.equal(g.freezeout.level,5);
+  assert.equal(g.remaining,1200);assert.equal(g.deadline,1201000);assert.equal(g.running,true);
+});
+test('freezeout settles a running clock before restarting its actual level',()=>{
+  const g=game();toggleClock(g,0);
+  startFreezeout(g,1205000);
+  assert.equal(g.index,1);assert.equal(g.elapsed,1205000);
+  assert.equal(g.remaining,1200);assert.equal(g.deadline,2405000);
+});
+test('freezeout is unavailable in cash and completed games',()=>{
+  for(const g of [game({mode:'cash'}),{...game(),finished:true},{...game(),structureEnded:true}]) {
+    const before=structuredClone(g);assert.equal(startFreezeout(g,1000),false);assert.deepEqual(g,before);
+  }
+  const g=game();toggleClock(g,0);
+  assert.equal(startFreezeout(g,1000000000),false);assert.equal(g.freezeout,null);assert.equal(g.structureEnded,true);
+});
+test('freezeout keeps manual reentry and unlimited addons available',()=>{
+  const g=game({bountyMode:'progressive'});startFreezeout(g,0);
+  eliminate(g,'1',1000,'2');addEntry(g,'1','reentry',100000);
+  for(let i=0;i<4;i++)addEntry(g,'1','addon',100000+i);
+  assert.equal(g.players[0].reentries,1);assert.equal(g.players[0].addons,4);
+  assert.equal(g.config.reentry,true);assert.ok(g.freezeout);assertBankBalances(g);
+});
+test('undoing freezeout restores a paused timer or its original running schedule',()=>{
+  const paused=game();paused.remaining=90;const beforePause=structuredClone(paused);
+  startFreezeout(paused,1000);
+  const restoredPause=restoreAction(paused,beforePause,5000);
+  assert.equal(restoredPause.running,false);assert.equal(restoredPause.remaining,90);assert.equal(restoredPause.freezeout,null);
+  const running=game();toggleClock(running,0);const beforeRun=structuredClone(running);
+  startFreezeout(running,5000);
+  const restoredRun=restoreAction(running,beforeRun,8000);
+  assert.equal(restoredRun.running,true);assert.equal(restoredRun.remaining,1192);assert.equal(restoredRun.elapsed,8000);
+  assert.equal(restoredRun.deadline,1200000);assert.equal(restoredRun.freezeout,null);assert.equal(restoredRun.events.length,0);
+});
+test('undoing a financial operation after freezeout keeps its phase and clock',()=>{
+  const g=game();startFreezeout(g,0);const before=structuredClone(g);
+  addEntry(g,'1','addon',1000);const restored=restoreAction(g,before,2000);
+  assert.deepEqual(restored.freezeout,before.freezeout);assert.equal(restored.running,true);
+  assert.equal(restored.elapsed,2000);assert.equal(restored.remaining,1198);assert.equal(poolOf(restored),3000);
 });

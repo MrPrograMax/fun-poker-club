@@ -1,4 +1,4 @@
-import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addonsRemaining, addEntry, createGame, advanceClock, toggleClock, jumpLevel, restoreAction, eliminate, formatTime } from './engine.js';
+import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, restoreAction, eliminate, formatTime } from './engine.js';
 
 const KEY = 'river-poker-v1';
 const $ = selector => document.querySelector(selector);
@@ -22,6 +22,8 @@ const icons = {
   check: '<path d="m5 12 4 4L19 6"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   sound: '<path d="m11 4-6 5H2v6h3l6 5Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
   settings: '<path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/>',
+  flag: '<path d="M5 21V3m0 1c5-4 9 4 14 0v10c-5 4-9-4-14 0"/>',
+  chips: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 4 16 4 16 0V6M4 12v6c0 4 16 4 16 0v-6"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
 };
@@ -46,6 +48,7 @@ try {
   }
 } catch { /* Static preview uses the browser store. */ }
 state.config = { ...defaults(), ...state.config };
+delete state.config.addonLimit;
 if (state.game) normalizeGame(state.game);
 undo = state.undo || null;
 
@@ -115,7 +118,7 @@ function settingsView() {
 }
 function bountySettings() {
   const c=state.config;
-  return section('Баунти и возвращение в игру','04 / ЕЩЁ ОДИН ШАНС',`<div class="fields two"><label class="field"><span>Награда за выбивание</span><select name="bountyMode"><option value="off" ${c.bountyMode==='off'?'selected':''}>Без баунти</option><option value="fixed" ${c.bountyMode==='fixed'?'selected':''}>Фиксированное</option><option value="progressive" ${c.bountyMode==='progressive'?'selected':''}>Прогрессивное · PKO</option></select></label>${c.bountyMode!=='off'?numeric('Стартовая награда за голову','bountyAmount',c.bountyAmount,'₽',1,1000000):''}</div>${c.bountyMode==='progressive'?`<div class="spaced">${numeric('Доля награды сразу выбившему','bountyImmediate',c.bountyImmediate,'%',1,99)}<p class="field-hint">Остаток увеличивает награду за голову выбившего. Победитель забирает свою оставшуюся награду.</p></div>`:''}${c.bountyMode!=='off'?'<p class="field-hint">Баунти входит в стоимость первого входа и ре-энтри. Эта часть банка не распределяется по призовым местам.</p>':''}<div class="divider"></div>${toggle('Разрешить ре-энтри','Выбывший возвращается со стартовым стеком и новой головой','reentry',c.reentry)}<div class="fields two spaced">${numeric('Стоимость аддона','addonCost',c.addonCost,'₽')}${numeric('Фишки за аддон','addonStack',c.addonStack,'фишек')}</div><label class="field spaced"><span>Аддонов на игрока за турнир</span><select name="addonLimit">${[1,2,3].map(n=>`<option value="${n}" ${c.addonLimit===n?'selected':''}>${n}</option>`).join('')}</select></label><p class="field-hint">Аддон доступен через меню игрока и полностью увеличивает призовой фонд. Ре-энтри не сбрасывает лимит аддонов.</p>`);
+  return section('Баунти и возвращение в игру','04 / ЕЩЁ ОДИН ШАНС',`<div class="fields two"><label class="field"><span>Награда за выбивание</span><select name="bountyMode"><option value="off" ${c.bountyMode==='off'?'selected':''}>Без баунти</option><option value="fixed" ${c.bountyMode==='fixed'?'selected':''}>Фиксированное</option><option value="progressive" ${c.bountyMode==='progressive'?'selected':''}>Прогрессивное · PKO</option></select></label>${c.bountyMode!=='off'?numeric('Стартовая награда за голову','bountyAmount',c.bountyAmount,'₽',1,1000000):''}</div>${c.bountyMode==='progressive'?`<div class="spaced">${numeric('Доля награды сразу выбившему','bountyImmediate',c.bountyImmediate,'%',1,99)}<p class="field-hint">Остаток увеличивает награду за голову выбившего. Победитель забирает свою оставшуюся награду.</p></div>`:''}${c.bountyMode!=='off'?'<p class="field-hint">Баунти входит в стоимость первого входа и ре-энтри. Эта часть банка не распределяется по призовым местам.</p>':''}<div class="divider"></div>${toggle('Разрешить ре-энтри','Выбывший возвращается со стартовым стеком и новой головой','reentry',c.reentry)}<div class="fields two spaced">${numeric('Стоимость аддона','addonCost',c.addonCost,'₽')}${numeric('Фишки за аддон','addonStack',c.addonStack,'фишек')}</div><p class="field-hint">Аддон доступен через меню активного игрока и полностью увеличивает призовой фонд. Количество аддонов не ограничено.</p>`);
 }
 function summaryView() {
   const c = state.config, bounty=c.mode==='tournament'&&c.bountyMode!=='off'?c.bountyAmount:0, pool = Math.max(0,c.buyin-bounty) * c.seats, valid = Math.abs(c.prizes.reduce((a,b)=>a+b,0)-100)<.001;
@@ -171,7 +174,7 @@ function boardView() {
     <div class="blind-cards"><div><span>${cash?'Малый блайнд':'Текущие блайнды'}</span><small>${cash?'SB':'МБ / ББ'}</small><strong>${cash?number(c.sb):level.kind==='break'?'Перерыв':`${number(level.sb)}<i>/</i>${number(level.bb)}`}</strong>${!cash&&level.ante?`<small>BB ante ${number(level.ante)}</small>`:''}</div><div><span>${cash?'Большой блайнд':'Следующие блайнды'}</span><small>${cash?'BB':next?.kind==='break'?`${next.duration/60} минут`:'МБ / ББ'}</small><strong>${cash?number(c.bb):!next?'—':next.kind==='break'?'Перерыв':`${number(next.sb)}<i>/</i>${number(next.bb)}`}</strong>${!cash&&next?.ante?`<small>BB ante ${number(next.ante)}</small>`:''}</div></div>
     ${g.finished?`<div class="winner-banner">${icon('trophy')} ${cash?'Сессия завершена':`Победитель — ${escape(nameOf(g.players.find(p=>p.place===1)))}`}</div>`:''}
   </section>${prizesView(g)}</div>
-  <div class="board-controlbar"><button class="button primary play-button" data-action="play" ${g.finished||g.structureEnded?'disabled':''}>${icon(g.running?'pause':'play')}<span>${g.running?'Пауза':'Запустить'}</span></button><button class="button subtle players-button" data-action="players" aria-expanded="${playersVisible}" aria-controls="players-panel">${icon('people')}${cash?'Игроки и расчёты':'Игроки и баунти'}</button>${!cash?`<button class="button subtle next-button" data-action="next" ${g.index===g.levels.length-1||g.finished?'disabled':''}>${icon('arrow')} Следующий уровень</button>`:''}<span class="board-player-count">В игре <b>${alive}</b> из ${g.players.length}</span></div>
+  <div class="board-controlbar"><button class="button primary play-button" data-action="play" ${g.finished||g.structureEnded?'disabled':''}>${icon(g.running?'pause':'play')}<span>${g.running?'Пауза':'Запустить'}</span></button><button class="button subtle players-button" data-action="players" aria-expanded="${playersVisible}" aria-controls="players-panel">${icon('people')}${cash?'Игроки и расчёты':'Игроки и баунти'}</button>${!cash?`<button class="button subtle next-button" data-action="next" ${g.index===g.levels.length-1||g.finished?'disabled':''}>${icon('arrow')} Следующий уровень</button>`:''}${!cash?(g.freezeout?`<span class="freezeout-status">${icon('flag')}<span>Фризаут<small>${c.reentry?'Ре-энтри вручную':'Ре-энтри выключены'}</small></span></span>`:`<button class="button subtle freezeout-button" data-action="freezeout" ${g.finished||g.structureEnded?'disabled':''} title="Начать фризаут и запустить уровень заново">${icon('flag')} Фризаут</button>`):''}<span class="board-player-count">В игре <b>${alive}</b> из ${g.players.length}</span></div>
   <div id="players-panel" ${playersVisible?'':'hidden'}>${playersVisible?`${rosterView(g)}${eventView(g)}`:''}</div>`;
 }
 function prizesView(g) {
@@ -184,8 +187,7 @@ function playerActions(g, p) {
   const cash=g.config.mode==='cash', name=escape(nameOf(p));
   if(p.active&&!g.finished) {
     if(cash) return `<button class="mini-button" data-action="cashin" data-id="${p.id}" aria-label="Добавить вход: ${name}"><span aria-hidden="true">+</span> Вход</button><button class="mini-button" data-action="cashout" data-id="${p.id}" aria-label="Выход: ${name}"><span aria-hidden="true">↗</span> Выход</button>`;
-    const remaining=addonsRemaining(g,p);
-    return `<button class="mini-button" data-action="bust" data-id="${p.id}" aria-label="Выбыл: ${name}"><span aria-hidden="true">×</span> Выбыл</button><details class="player-menu"><summary class="mini-button" aria-label="Ещё действия: ${name}" title="Ещё действия">${icon('more')}</summary><div class="player-menu-content"><strong>Аддон</strong><small>${p.addons} из ${g.config.addonLimit} за турнир</small><button type="button" class="mini-button" data-action="addon" data-id="${p.id}" aria-label="Аддон: ${name}" ${remaining?'':'disabled'}>${remaining?`+ Аддон · ${money(g.config.addonCost)}`:'Лимит исчерпан'}</button></div></details>`;
+    return `<button class="mini-button" data-action="bust" data-id="${p.id}" aria-label="Выбыл: ${name}"><span aria-hidden="true">×</span> Выбыл</button><details class="player-menu"><summary class="mini-button" aria-label="Ещё действия: ${name}" title="Ещё действия">${icon('more')}</summary><div class="player-menu-content"><div class="addon-heading"><span class="addon-icon">${icon('chips')}</span><div><strong>Добавить фишки</strong><small>Аддон · ${name}</small></div></div><div class="addon-offer"><div><small>Взнос</small><strong>${money(g.config.addonCost)}</strong></div><div><small>Фишки</small><strong>+${number(g.config.addonStack)}</strong></div></div><button type="button" class="mini-button" data-action="addon" data-id="${p.id}" aria-label="Аддон: ${name}">${icon('plus')} Добавить аддон</button><div class="addon-footnote">Уже взято: ${p.addons}<span>Без ограничений</span></div></div></details>`;
   }
   if(p.place===1)return '<span class="winner-crown">♛</span>';
   if(!cash&&!p.active&&g.config.reentry)return `<button class="mini-button" data-action="reentry" data-id="${p.id}" aria-label="Ре-энтри: ${name}"><span aria-hidden="true">↻</span> Ре-энтри</button>`;
@@ -199,7 +201,7 @@ function rosterView(g) {
 function eventView(g) {
   if(!g.events?.length)return '';
   const player=id=>escape(nameOf(g.players.find(p=>p.id===id)||{name:'Игрок'}));
-  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary><div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}`}</span>${i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
+  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary><div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='freezeout'?`Начат фризаут · уровень ${e.level}`:e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}`}</span>${i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
 }
 function tick() {
   const g = state.game; if (!g) return;
@@ -245,7 +247,7 @@ function showStructure() {
   const options={targetMinutes:240,extraEntries:0,addons:0,...state.plannerOptions,...state.autoStructure};
   let autoOptions=state.autoStructure ? {...state.autoStructure} : null;
   const c=state.config;
-  modal('Структура турнира', `<div class="structure-planner"><h3>Подобрать под ваш вечер</h3><p>Стек ${number(c.stack)} · ${c.seats} игроков · старт ${number(c.sb)} / ${number(c.bb)}. Уровни около ${c.duration} мин${c.breakEvery?`, перерыв ${c.breakDuration} мин каждые ${c.breakEvery} уровня`:`, без перерывов`}.</p><div class="planner-time">${numeric('Желаемая длительность турнира','targetMinutes',options.targetMinutes,'мин',30,1440)}<button type="button" class="button primary" id="calculate-structure">Рассчитать</button></div><details class="planner-extras"><summary>Планируемые ре-энтри и аддоны</summary><p class="field-hint">Необязательно. Укажите суммарное количество за весь турнир, а не на одного игрока.</p><div class="fields two">${numeric('Ре-энтри','extraEntries',options.extraEntries,'шт.',0,1000)}${numeric('Аддоны','addons',options.addons,'шт.',0,c.seats*c.addonLimit)}</div></details><div id="plan-summary" class="plan-summary" aria-live="polite"></div></div><p class="field-hint">Это ориентир, а не точное время окончания. Темп игры и фактические докупки повлияют на длительность. Любой уровень можно отредактировать.</p><div class="level-editor">${editorRows(rows)}</div>`, 'Сохранить', data=>{
+  modal('Структура турнира', `<div class="structure-planner"><h3>Подобрать под ваш вечер</h3><p>Стек ${number(c.stack)} · ${c.seats} игроков · старт ${number(c.sb)} / ${number(c.bb)}. Уровни около ${c.duration} мин${c.breakEvery?`, перерыв ${c.breakDuration} мин каждые ${c.breakEvery} уровня`:`, без перерывов`}.</p><div class="planner-time">${numeric('Желаемая длительность турнира','targetMinutes',options.targetMinutes,'мин',30,1440)}<button type="button" class="button primary" id="calculate-structure">Рассчитать</button></div><details class="planner-extras"><summary>Планируемые ре-энтри и аддоны</summary><p class="field-hint">Необязательно. Укажите суммарное количество за весь турнир, а не на одного игрока.</p><div class="fields two">${numeric('Ре-энтри','extraEntries',options.extraEntries,'шт.',0,1000)}${numeric('Аддоны','addons',options.addons,'шт.',0,1000)}</div></details><div id="plan-summary" class="plan-summary" aria-live="polite"></div></div><p class="field-hint">Это ориентир, а не точное время окончания. Темп игры и фактические докупки повлияют на длительность. Любой уровень можно отредактировать.</p><div class="level-editor">${editorRows(rows)}</div>`, 'Сохранить', data=>{
     if (autoOptions && JSON.stringify(readOptions()) !== JSON.stringify(autoOptions)) { toast('Параметры изменились. Нажмите «Рассчитать» перед сохранением'); return false; }
     for(let i=0;i<rows.length;i++) {
       const l=rows[i];l.duration=Number(data.get(`duration-${i}`))*60;
@@ -329,6 +331,11 @@ document.addEventListener('click',async event=>{
   if(action==='fullscreen'){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{toast('Полноэкранный режим недоступен в этом браузере');}return;}
   if(!g)return;
   if(action==='play'){if(state.sound){try{audioContext ||= new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();}catch{}}toggleClock(g);store();return render();}
+  if(action==='freezeout') {
+    const before=structuredClone(g);
+    if(!startFreezeout(g)){store();render();return;}
+    undo=before;state.undo=undo;store();render();toast(`Фризаут начат. ${g.config.reentry?'Ре-энтри доступны вручную.':'Ре-энтри выключены в настройках.'}`,true);return;
+  }
   if(action==='next'||action==='prev')return modal(action==='next'?'Следующий уровень?':'Предыдущий уровень?', '<p>Таймер выбранного уровня начнётся с полной длительности.</p>', 'Переключить',()=>{jumpLevel(g,g.index+(action==='next'?1:-1));store();render();});
   if(action==='undo'){if(undo){state.game=restoreAction(g,undo);clearUndo();store();render();toast('Последнее действие отменено');}return;}
   const p=g.players.find(p=>p.id===button.dataset.id);if(!p)return;
@@ -336,7 +343,6 @@ document.addEventListener('click',async event=>{
   if(!p.active||g.finished)return;
   if(action==='bust')return modal(`${escape(nameOf(p))} выбывает?`, `<label class="field"><span>Кто выбил игрока?</span><select name="killer" ${g.config.bountyMode!=='off'?'required':''}><option value="">${g.config.bountyMode!=='off'?'Выберите игрока':'Не учитывать выбивание'}</option>${g.players.filter(x=>x.active&&x.id!==p.id).map(x=>`<option value="${x.id}">${escape(nameOf(x))}</option>`).join('')}</select></label><p class="field-hint">${g.config.bountyMode==='progressive'?`Награда ${money(p.bounty)}: ${g.config.bountyImmediate}% сразу выбившему, остаток на его голову.`:g.config.bountyMode==='fixed'?`Выбивший получит ${money(p.bounty)}.`:'Выбивание сохранится в статистике.'} Последнее действие можно отменить.</p>`, 'Подтвердить',data=>{saveUndo();eliminate(g,p.id,Date.now(),data.get('killer')||null);store();render();});
   if(action==='addon'&&g.config.mode==='tournament') {
-    if(!addonsRemaining(g,p))return toast('Лимит аддонов для игрока исчерпан');
     saveUndo();addEntry(g,p.id,'addon');store();render();toast(`${nameOf(p)} · аддон +${money(g.config.addonCost)}`,true);return;
   }
   if(action==='cashin'&&g.config.mode==='cash')return modal('Добавить вход',numeric('Сумма входа','amount',g.config.buyin,'₽',1,10000000),'Добавить', data=>{saveUndo();p.invested+=Number(data.get('amount'));p.entries++;store();render();toast(`${nameOf(p)} · вход +${money(Number(data.get('amount')))}`,true);});
