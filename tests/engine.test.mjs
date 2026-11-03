@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
@@ -168,4 +168,44 @@ test('smart structure rejects invalid and infeasible inputs',()=>{
   for(const options of [{targetMinutes:0},{targetMinutes:1441},{targetMinutes:NaN},{extraEntries:-1},{extraEntries:1.5},{addons:Infinity}]) assert.throws(()=>recommendStructure(defaults(),options));
   for(const config of [{stack:0},{seats:201},{bb:25},{duration:0},{breakEvery:-1}]) assert.throws(()=>recommendStructure({...defaults(),...config}));
   assert.throws(()=>recommendStructure({...defaults(),stack:1,sb:25,bb:50},{targetMinutes:1440}));
+});
+
+test('undo restores contributions and history without rewinding the timer or level',()=>{
+  const g=game();toggleClock(g,0);
+  const snapshot=structuredClone(g);
+  addEntry(g,'1','addon',1000);
+  jumpLevel(g,2,2000);
+  const restored=restoreAction(g,JSON.parse(JSON.stringify(snapshot)),5000);
+  assert.equal(poolOf(restored),3000);
+  assert.equal(restored.players[0].addons,0);
+  assert.equal(restored.events.length,0);
+  assert.equal(restored.index,2);
+  assert.equal(restored.remaining,1197);
+  assert.equal(restored.elapsed,5000);
+  assert.equal(restored.running,true);
+  assert.equal(restored.deadline,g.deadline);
+});
+test('undoing a final knockout restores heads and players and leaves the clock paused',()=>{
+  const g=game({bountyMode:'progressive'});
+  eliminate(g,'3',0,'1');toggleClock(g,0);
+  const snapshot=structuredClone(g);
+  eliminate(g,'2',1000,'1');
+  const restored=restoreAction(g,snapshot,5000);
+  assert.equal(restored.finished,false);
+  assert.equal(restored.running,false);
+  assert.equal(restored.elapsed,1000);
+  assert.deepEqual(restored.players,snapshot.players);
+  assert.deepEqual(restored.winnerBounty,snapshot.winnerBounty);
+});
+test('undoing reentry returns a reopened tournament to its settled result',()=>{
+  const g=game({bountyMode:'fixed'});
+  eliminate(g,'3',0,'1');eliminate(g,'2',0,'1');
+  const snapshot=structuredClone(g);
+  addEntry(g,'2','reentry',1000);toggleClock(g,1000);
+  const restored=restoreAction(g,snapshot,3000);
+  assert.equal(restored.finished,true);
+  assert.equal(restored.running,false);
+  assert.equal(restored.deadline,null);
+  assert.deepEqual(restored.players,snapshot.players);
+  assert.deepEqual(restored.events,snapshot.events);
 });

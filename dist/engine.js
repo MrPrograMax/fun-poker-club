@@ -189,6 +189,15 @@ export function jumpLevel(game, index, now = Date.now()) {
   game.deadline = game.running ? now + game.remaining * 1000 : null;
 }
 
+export function restoreAction(game, snapshot, now = Date.now()) {
+  advanceClock(game, now);
+  const restored = structuredClone(snapshot);
+  // Revert the operation, while keeping the clock and level as the host left them.
+  for (const key of ['index', 'remaining', 'elapsed', 'running', 'deadline', 'lastTick', 'structureEnded']) restored[key] = game[key];
+  if (restored.finished) { restored.running = false; restored.deadline = null; }
+  return restored;
+}
+
 export function eliminate(game, id, now = Date.now(), killerId = null) {
   const player = game.players.find(p => p.id === id);
   if (!player?.active || game.finished) return;
