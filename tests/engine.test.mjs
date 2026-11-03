@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
@@ -124,4 +124,48 @@ test('rejects out-of-range groups without trying to allocate seats',()=>{
   }
   assert.equal(validateConfig({...defaults(),seats:200}),'');
   assert.notEqual(validateConfig({...defaults(),tableCapacity:11}),'');
+});
+
+test('smart structure fills the requested time including breaks and preserves opening blinds',()=>{
+  const c=defaults(), plan=recommendStructure(c,{targetMinutes:240});
+  assert.equal(plan.levels.reduce((sum,l)=>sum+l.duration,0),240*60);
+  assert.equal(plan.playingMinutes+plan.breakMinutes,240);
+  assert.equal(plan.chips,60000);
+  assert.equal(plan.finalBB,3000);
+  assert.equal(plan.levels[0].sb,c.sb);
+  assert.equal(plan.levels[0].bb,c.bb);
+  assert.equal(plan.levels.at(-1).kind,'level');
+  const playing=plan.levels.filter(l=>l.kind==='level');
+  assert.ok(playing.every((l,i)=>l.number===i+1 && (i===0 || l.bb>playing[i-1].bb)));
+});
+test('smart structure accounts for planned entries, addons and BB ante',()=>{
+  const c={...defaults(),ante:true};
+  const base=recommendStructure(c), withExtras=recommendStructure(c,{extraEntries:6,addons:6});
+  assert.equal(withExtras.chips,150000);
+  assert.ok(withExtras.finalBB>base.finalBB);
+  assert.ok(withExtras.levels.filter(l=>l.kind==='level').every(l=>l.ante===l.bb));
+});
+test('smart structure supports short, long and multitable evenings without trailing breaks',()=>{
+  for(const seats of [2,6,15,50,200]) for(const targetMinutes of [30,120,240,480,720]) for(const breakEvery of [0,3,4,6]) {
+    const c={...defaults(),seats,breakEvery};
+    const plan=recommendStructure(c,{targetMinutes});
+    assert.equal(plan.levels.reduce((sum,l)=>sum+l.duration,0),targetMinutes*60);
+    const playing=plan.levels.filter(l=>l.kind==='level');
+    assert.equal(plan.levels.filter(l=>l.kind==='break').length,breakEvery?Math.floor((playing.length-1)/breakEvery):0);
+    assert.equal(plan.levels.at(-1).kind,'level');
+    assert.ok(playing.every((l,i)=>Number.isInteger(l.sb)&&l.sb>=1&&l.sb<l.bb&&l.duration>=60&&l.duration<=10800&&(i===0||l.bb>playing[i-1].bb)));
+    assert.ok(plan.finalBB>=plan.chips/20);
+  }
+});
+test('smart structure rounds later blinds to opening chip units',()=>{
+  for(const [sb,bb] of [[25,50],[100,200],[10,25],[3,7]]) {
+    const plan=recommendStructure({...defaults(),sb,bb});
+    assert.equal(plan.levels[0].sb,sb);assert.equal(plan.levels[0].bb,bb);
+    assert.ok(plan.levels.filter(l=>l.kind==='level').every(l=>Number.isInteger(l.sb)&&Number.isInteger(l.bb)));
+  }
+});
+test('smart structure rejects invalid and infeasible inputs',()=>{
+  for(const options of [{targetMinutes:0},{targetMinutes:1441},{targetMinutes:NaN},{extraEntries:-1},{extraEntries:1.5},{addons:Infinity}]) assert.throws(()=>recommendStructure(defaults(),options));
+  for(const config of [{stack:0},{seats:201},{bb:25},{duration:0},{breakEvery:-1}]) assert.throws(()=>recommendStructure({...defaults(),...config}));
+  assert.throws(()=>recommendStructure({...defaults(),stack:1,sb:25,bb:50},{targetMinutes:1440}));
 });

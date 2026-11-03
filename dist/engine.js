@@ -36,6 +36,61 @@ export function makeLevels(config) {
   return levels;
 }
 
+export function recommendStructure(config, { targetMinutes = 240, extraEntries = 0, addons = 0 } = {}) {
+  const { stack, seats, sb, bb, duration, breakEvery, breakDuration, addonStack } = config;
+  if (!Number.isInteger(targetMinutes) || targetMinutes < 30 || targetMinutes > 1440) throw new Error('Длительность турнира: от 30 до 1 440 минут');
+  if (![extraEntries, addons].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)) throw new Error('Ожидаемые докупки: от 0 до 1 000');
+  if (!Number.isInteger(stack) || stack < 1 || stack > 10000000 || !Number.isInteger(seats) || seats < 2 || seats > MAX_PLAYERS) throw new Error('Проверьте стартовый стек и количество игроков в настройках');
+  if (![sb, bb].every(n => Number.isInteger(n) && n > 0 && n <= 1000000) || sb >= bb) throw new Error('Проверьте стартовые блайнды в настройках');
+  if (!Number.isInteger(duration) || duration < 1 || duration > 180 || !Number.isInteger(breakEvery) || breakEvery < 0 || breakEvery > 12 || !Number.isInteger(breakDuration) || breakDuration < 1 || breakDuration > 60) throw new Error('Проверьте длительность уровней и перерывов');
+  if (addons && (!Number.isInteger(addonStack) || addonStack < 1 || addonStack > 10000000)) throw new Error('Проверьте количество фишек за аддон');
+  const chips = stack * (seats + extraEntries) + (addons ? addons * addonStack : 0);
+  // A planning heuristic, not a prediction: heads-up becomes shallow near 20 BB in all chips.
+  const targetBB = Math.max(bb * 2, chips / 20);
+  if (targetBB > 100000000) throw new Error('Слишком много фишек для автоподбора. Уменьшите стек или ожидаемые докупки');
+  const gcd = (a, b) => b ? gcd(b, a % b) : a;
+  const unit = gcd(sb, bb), step = unit * 2;
+  const candidates = new Set([bb]);
+  for (let magnitude = 1; magnitude <= 100000000; magnitude *= 10) {
+    for (const factor of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8]) {
+      const value = Math.round(factor * magnitude / step) * step;
+      if (value > bb && value <= 100000000) candidates.add(value);
+    }
+  }
+  const ladder = [...candidates].sort((a, b) => a - b);
+  const last = ladder.findIndex(value => value >= targetBB);
+  if (last < 1) throw new Error('Не удалось подобрать финальные блайнды');
+  ladder.length = last + 1;
+  let best;
+  for (let count = 2; count <= Math.min(60, ladder.length); count++) {
+    const breaks = breakEvery ? Math.floor((count - 1) / breakEvery) : 0;
+    const playingMinutes = targetMinutes - breaks * breakDuration;
+    if (playingMinutes < count || playingMinutes > count * 180) continue;
+    const score = Math.abs(playingMinutes / count - duration);
+    if (!best || score < best.score) best = { count, breaks, playingMinutes, score };
+  }
+  if (!best) throw new Error('Такое время не помещается в структуру. Измените длительность турнира или перерывов');
+  const levels = [], selected = [bb];
+  let previous = 0;
+  for (let i = 1; i < best.count; i++) {
+    const target = bb * (ladder.at(-1) / bb) ** (i / (best.count - 1));
+    const limit = ladder.length - (best.count - i);
+    let chosen = previous + 1;
+    for (let j = chosen; j <= limit; j++) {
+      if (Math.abs(Math.log(ladder[j] / target)) < Math.abs(Math.log(ladder[chosen] / target))) chosen = j;
+    }
+    selected.push(ladder[chosen]);
+    previous = chosen;
+  }
+  selected.forEach((big, i) => {
+    if (i && breakEvery && i % breakEvery === 0) levels.push({ kind: 'break', duration: breakDuration * 60 });
+    const minutes = Math.floor(best.playingMinutes / best.count) + (i < best.playingMinutes % best.count ? 1 : 0);
+    levels.push({ kind: 'level', number: i + 1, sb: i ? big / 2 : sb, bb: big, ante: config.ante ? big : 0, duration: minutes * 60 });
+  });
+  return { levels, chips, targetMinutes, playingMinutes: best.playingMinutes, breakMinutes: best.breaks * breakDuration,
+    startDepth: stack / bb, finalBB: selected.at(-1), maxIncrease: Math.max(...selected.slice(1).map((value, i) => value / selected[i])) };
+}
+
 // Largest-remainder allocation keeps the total exact, even for odd prize pools.
 export function payouts(pool, percentages) {
   const raw = percentages.map(p => pool * p / 100);

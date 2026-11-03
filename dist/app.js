@@ -1,4 +1,4 @@
-import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, createGame, advanceClock, toggleClock, jumpLevel, eliminate, formatTime } from './engine.js';
+import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, createGame, advanceClock, toggleClock, jumpLevel, eliminate, formatTime } from './engine.js';
 
 const KEY = 'river-poker-v1';
 const $ = selector => document.querySelector(selector);
@@ -10,6 +10,7 @@ const initials = p => nameOf(p).split(/\s+/).slice(0, 2).map(v => v[0]).join('')
 const uid = () => crypto.randomUUID();
 const tableLabel = count => `${count} ${count % 100 >= 11 && count % 100 <= 14 ? 'столов' : count % 10 === 1 ? 'стол' : count % 10 >= 2 && count % 10 <= 4 ? 'стола' : 'столов'}`;
 let selectedTable = 1;
+let playersVisible = false;
 const icons = {
   arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
   play: '<path d="m8 5 11 7-11 7Z"/>', pause: '<path d="M8 5v14M16 5v14"/>',
@@ -20,6 +21,7 @@ const icons = {
   trophy: '<path d="M8 3h8v7a4 4 0 0 1-8 0Zm0 2H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4m-4 2v6m-4 1h8"/>',
   check: '<path d="m5 12 4 4L19 6"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   sound: '<path d="m11 4-6 5H2v6h3l6 5Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+  settings: '<path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
 };
@@ -68,7 +70,22 @@ async function flush() {
 }
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toast.timeout); toast.timeout = setTimeout(() => $('#toast').classList.remove('visible'), 5500); }
 function ensureSeats() { if (!Number.isInteger(state.config.seats) || state.config.seats < 2 || state.config.seats > MAX_PLAYERS) return; while (state.seats.length < state.config.seats) state.seats.push({ id: uid(), name: '', nick: '' }); state.seats.length = state.config.seats; }
-function levels() { return state.levels || makeLevels(state.config); }
+function levels() { return state.config.mode === 'cash' ? makeLevels(state.config) : state.autoStructure ? recommendStructure(state.config, state.autoStructure).levels : state.levels || makeLevels(state.config); }
+function setupError() {
+  const error = validateConfig(state.config);
+  if (error) return error;
+  if (state.config.mode === 'tournament') { try { levels(); } catch (error) { return error.message; } }
+  return '';
+}
+function structureLabel() {
+  try { return `${levels().filter(l=>l.kind==='level').length} уровней · ${state.autoStructure?'автоподбор':'настроить'}`; }
+  catch { return 'Проверьте параметры'; }
+}
+function structureHint() {
+  if (!state.autoStructure) return 'Задайте желаемое время турнира — подберём структуру, которую можно поправить вручную.';
+  try { const plan=recommendStructure(state.config,state.autoStructure);return `Автоподбор на ${plan.targetMinutes} мин с перерывами. Пересчитывается при изменении стека, игроков и блайндов.`; }
+  catch (error) { return error.message; }
+}
 function go(step) { state.step = step; store(); render(); window.scrollTo(0, 0); }
 function section(title, subtitle, content, extra = '') { return `<section class="panel ${extra}"><div class="section-heading"><h2>${title}</h2>${subtitle ? `<span>${subtitle}</span>` : ''}</div>${content}</section>`; }
 function input(label, key, value, unit = '', attrs = '') { return `<label class="field"><span>${label}</span><div class="input-wrap"><input name="${key}" value="${escape(value)}" ${attrs}>${unit ? `<span class="unit">${unit}</span>` : ''}</div></label>`; }
@@ -91,7 +108,7 @@ function settingsView() {
   ${state.game ? '<div class="notice">Игра уже создана. Её настройки зафиксированы; для изменения структуры начните новую игру.</div>' : ''}
   <form id="settings-form"><fieldset ${state.game ? 'disabled' : ''}><div class="setup-grid"><div class="setup-main">
     ${section('Формат игры', '01 / ОСНОВНОЕ', `<div class="mode-picker"><button type="button" data-action="mode" data-mode="tournament" class="mode-card ${c.mode === 'tournament' ? 'active' : ''}"><span class="mode-icon">${icon('trophy')}</span><span><strong>Турнир</strong><small>Растущие блайнды и призовые места</small></span><i class="radio"></i></button><button type="button" data-action="mode" data-mode="cash" class="mode-card ${c.mode === 'cash' ? 'active' : ''}"><span class="mode-icon cash-icon">♣</span><span><strong>Кэш-игра</strong><small>Постоянные блайнды, свободный выход</small></span><i class="radio"></i></button></div>${input('Название вечера', 'name', c.name, '', 'type="text" maxlength="60" required placeholder="Например, пятничный покер"')}`)}
-    ${section('Стек и блайнды', '02 / СТРУКТУРА', `<div class="fields three">${numeric('Стартовый стек', 'stack', c.stack, 'фишек')}${numeric('Малый блайнд', 'sb', c.sb, 'SB', 1, 1000000)}${numeric('Большой блайнд', 'bb', c.bb, 'BB', 2, 1000000)}</div>${c.mode === 'tournament' ? `<div class="fields two spaced">${numeric('Длительность уровня', 'duration', c.duration, 'мин', 1, 180)}<label class="field"><span>Рост блайндов</span><button type="button" class="input-button" data-action="structure">12 уровней · настроить ${icon('arrow')}</button></label></div><div class="divider"></div>${toggle('Big blind ante', 'Анте оплачивает только большой блайнд', 'ante', c.ante)}<div class="fields two spaced"><label class="field"><span>Перерыв</span><select name="breakEvery">${[0, 3, 4, 6].map(v => `<option value="${v}" ${c.breakEvery === v ? 'selected' : ''}>${v ? `Каждые ${v} уровня` : 'Без перерывов'}</option>`).join('')}</select></label>${numeric('Длительность перерыва', 'breakDuration', c.breakDuration, 'мин', 1, 60)}</div>` : '<p class="field-hint">Блайнды фиксируются на всю сессию. Таймер показывает время игры.</p>'}`)}
+    ${section('Стек и блайнды', '02 / СТРУКТУРА', `<div class="fields three">${numeric('Стартовый стек', 'stack', c.stack, 'фишек')}${numeric('Малый блайнд', 'sb', c.sb, 'SB', 1, 1000000)}${numeric('Большой блайнд', 'bb', c.bb, 'BB', 2, 1000000)}</div>${c.mode === 'tournament' ? `<div class="fields two spaced">${numeric('Длительность уровня', 'duration', c.duration, 'мин', 1, 180)}<label class="field"><span>Структура турнира</span><button type="button" class="input-button" data-action="structure"><span id="structure-label">${structureLabel()}</span> ${icon('arrow')}</button></label></div><p class="field-hint" id="structure-hint">${escape(structureHint())}</p><div class="divider"></div>${toggle('Big blind ante', 'Анте оплачивает только большой блайнд', 'ante', c.ante)}<div class="fields two spaced"><label class="field"><span>Перерыв</span><select name="breakEvery">${[0, 3, 4, 6].map(v => `<option value="${v}" ${c.breakEvery === v ? 'selected' : ''}>${v ? `Каждые ${v} уровня` : 'Без перерывов'}</option>`).join('')}</select></label>${numeric('Длительность перерыва', 'breakDuration', c.breakDuration, 'мин', 1, 60)}</div>` : '<p class="field-hint">Блайнды фиксируются на всю сессию. Таймер показывает время игры.</p>'}`)}
     ${section(c.mode === 'tournament' ? 'Взносы и призовые' : 'Вход в игру', '03 / БАНК', `<div class="fields two">${numeric(c.mode === 'tournament' ? 'Бай-ин' : 'Стартовый вход', 'buyin', c.buyin, '₽')}${numeric('Количество игроков', 'seats', c.seats, 'чел.', 2, MAX_PLAYERS)}</div><div class="fields two spaced"><label class="field"><span>Максимум игроков за столом</span><select name="tableCapacity">${Array.from({length:9},(_,i)=>i+2).map(n=>`<option value="${n}" ${c.tableCapacity===n?'selected':''}>${n}</option>`).join('')}</select></label><div class="table-plan"><span>Рассадка</span><strong id="table-plan">${planDescription()}</strong></div></div>${c.mode === 'tournament' ? `<div class="divider"></div><div class="prize-heading"><label for="prize-count">Призовые места</label><select id="prize-count" name="prizeCount">${[1,2,3,4,5].map(n => `<option value="${n}" ${n === c.prizes.length ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div class="prize-inputs">${c.prizes.map((p, i) => numeric(`${i + 1}-е место`, `prize-${i}`, p, '%', 1, 100)).join('')}</div><div id="prize-total" class="field-hint">Всего ${c.prizes.reduce((a,b) => a+b,0)}% из 100%</div><div class="divider"></div>${toggle('Разрешить ребаи', 'Ещё один стартовый стек за стоимость бай-ина', 'rebuy', c.rebuy)}` : '<p class="field-hint">Докупки и сумма при выходе учитываются отдельно для каждого игрока.</p>'}`)}
     ${c.mode==='tournament'?bountySettings():''}</div><aside class="setup-side"><div id="summary">${summaryView()}</div><div class="side-note">${icon('people')}<div><strong>Свои люди за одним столом</strong><p>Сохраним имена и ники — в следующий раз останется только выбрать друзей.</p></div></div></aside></div></fieldset><div class="form-bottom"><span>Все настройки можно изменить до начала игры</span>${state.game ? '<button type="button" class="button primary" data-action="nav" data-step="board">Вернуться к игре</button>' : `<button type="submit" class="button primary">К рассадке ${icon('arrow')}</button>`}</div></form>`;
 }
@@ -134,24 +151,37 @@ function tableVisual() {
   return `${tables.length > 1 ? `<div class="table-tabs" role="group" aria-label="Выбор стола">${tables.map(t => `<button type="button" data-action="select-table" data-table="${t.number}" aria-pressed="${t.number===selectedTable}" class="${t.number===selectedTable?'selected':''}">Стол ${t.number}<small>${t.players.length}</small></button>`).join('')}</div>` : ''}<div class="eyebrow table-caption">СТОЛ № ${String(current.number).padStart(2,'0')} · ${current.players.length} МЕСТ</div><div class="poker-table"><div class="table-felt"><span class="table-brand">RIVER<span>♠</span></span><small>GOOD FRIENDS. GOOD HANDS.</small><div class="table-cards"><i>♠</i><i>♣</i><i>♥</i></div></div>${current.players.map((p,i) => { const a = -Math.PI/2 + 2*Math.PI*i/current.players.length; return `<div class="table-seat ${p.name ? 'occupied' : ''}" data-seat-number="${p.seat}" style="--x:${50+38*Math.cos(a)}%;--y:${50+40*Math.sin(a)}%"><span>${p.name ? escape(initials(p)) : String(p.seat).padStart(2,'0')}</span><small title="${escape(nameOf(p) || 'Свободно')}">${escape(nameOf(p) || 'Свободно')}</small></div>`; }).join('')}</div>`;
 }
 function gameMenu(g) {
-  return `<details class="game-menu"><summary class="button icon-button" aria-label="Меню игры" title="Меню игры">${icon('more')}</summary><div class="game-menu-content"><span class="eyebrow">ИГРА ПОДГОТОВЛЕНА</span><p>${g.players.length} игроков · ${tableLabel(new Set(g.players.map(p=>p.table)).size)}</p><button type="button" data-action="nav" data-step="settings">${icon('check')} Настройки игры</button><button type="button" data-action="nav" data-step="seating">${icon('people')} Рассадка по столам</button><div class="divider"></div><button type="button" data-action="new">${icon('plus')} Новая игра</button></div></details>`;
+  return `<details class="game-menu"><summary class="button icon-button" aria-label="Меню игры" title="Меню игры">${icon('settings')}</summary><div class="game-menu-content"><span class="eyebrow">ИГРА ПОДГОТОВЛЕНА</span><p>${g.players.length} игроков · ${tableLabel(new Set(g.players.map(p=>p.table)).size)}</p><button type="button" data-action="nav" data-step="settings">${icon('check')} Настройки игры</button><button type="button" data-action="nav" data-step="seating">${icon('people')} Рассадка по столам</button><div class="menu-elapsed">С начала игры <b id="elapsed">${formatTime(g.elapsed/1000,true)}</b></div>${g.config.mode==='tournament'?`<button type="button" data-action="prev" ${g.index===0||g.finished?'disabled':''}>${icon('back')} Предыдущий уровень</button>`:''}<div class="divider"></div><button type="button" data-action="new">${icon('plus')} Новая игра</button></div></details>`;
 }
 function boardView() {
   const g = state.game;
   if (!g) { state.step = 'settings'; return settingsView(); }
-  const c = g.config, cash = c.mode === 'cash', level = g.levels[g.index], next = g.levels[g.index+1], alive = g.players.filter(p=>p.active).length;
-  const pool = poolOf(g), prizes = payouts(pool, c.prizes);
-  return `<div class="board-heading"><div><div class="eyebrow">${cash ? 'CASH GAME' : 'NO-LIMIT HOLD’EM'} <span class="dot-separator">/</span> ${tableLabel(new Set(g.players.map(p=>p.table)).size).toUpperCase()}</div><h1>${escape(c.name)}</h1></div><div class="board-tools"><button class="button icon-button ${state.sound ? 'on' : ''}" data-action="sound" title="${state.sound ? 'Выключить' : 'Включить'} звук" aria-label="${state.sound ? 'Выключить' : 'Включить'} звук">${icon('sound')}</button><button class="button subtle small" data-action="fullscreen">${icon('expand')} Полный экран</button>${gameMenu(g)}</div></div>
-  <div class="board-grid">
-  <section class="timer-panel"><div class="timer-top"><span class="pill">${cash ? 'ВРЕМЯ СЕССИИ' : level.kind==='break'?'ПЕРЕРЫВ':`УРОВЕНЬ ${String(level.number).padStart(2,'0')}`}</span><span id="timer-status" class="timer-status">На паузе</span></div><div class="timer-display ${cash ? 'cash-timer' : ''} ${level.kind==='break'?'break-timer':''}" id="timer">${cash ? formatTime(g.elapsed/1000,true) : formatTime(g.remaining)}</div><div class="timer-progress"><div id="progress"></div></div><div class="board-elapsed">${icon('clock')} С начала игры <b id="elapsed">00:00:00</b></div><div class="timer-controls">${!cash ? `<button class="button icon-button" data-action="prev" aria-label="Предыдущий уровень" ${g.index===0||g.finished?'disabled':''}>${icon('back')}</button>` : ''}<button class="button primary play-button" data-action="play" ${g.finished||g.structureEnded?'disabled':''}>${icon(g.running?'pause':'play')}<span>${g.running?'Пауза':'Запустить таймер'}</span></button>${!cash ? `<button class="button icon-button" data-action="next" aria-label="Следующий уровень" ${g.index===g.levels.length-1||g.finished?'disabled':''}>${icon('arrow')}</button>` : ''}</div>
-  <div class="blind-cards"><div><span>${cash ? 'Малый блайнд' : 'Текущие блайнды'}</span><strong>${cash ? number(c.sb) : level.kind==='break'?'Отдыхаем':`${number(level.sb)}<i>/</i>${number(level.bb)}`}</strong><small>${!cash && level.ante ? `BB ante ${number(level.ante)}` : cash?'SB':'Без анте'}</small></div><div><span>${cash ? 'Большой блайнд' : 'Следующий уровень'}</span><strong>${cash ? number(c.bb) : !next ? '—' : next.kind==='break'?'Перерыв':`${number(next.sb)}<i>/</i>${number(next.bb)}`}</strong><small>${cash?'BB':!next?'Последний уровень':next.kind==='break'?`${next.duration/60} минут` : next.ante ? `BB ante ${number(next.ante)}`:'Без анте'}</small></div></div>
-  <div class="board-metrics"><div><span>Игроков в игре</span><strong>${alive}<i> / ${g.players.length}</i></strong></div><div><span>${cash?'Всего входов':'Стартовый стек'}</span><strong>${cash?money(pool):number(c.stack)}</strong></div><div><span>${cash?'Зафиксировано выходов':'Ребаи / ре-энтри / аддоны'}</span><strong>${cash?g.players.filter(p=>!p.active).length:`${g.players.reduce((n,p)=>n+p.rebuys,0)} / ${g.players.reduce((n,p)=>n+p.reentries,0)} / ${g.players.reduce((n,p)=>n+p.addons,0)}`}</strong></div></div>${g.finished?`<div class="winner-banner">${icon('trophy')} ${cash ? 'Сессия завершена' : `Победитель — ${escape(nameOf(g.players.find(p=>p.place===1)))}`}</div>`:''}</section>
-  <aside class="prizes-panel panel"><div class="section-heading"><h2>${cash?'Банк игры':'Призовые'}</h2>${icon('trophy')}</div><div class="board-pool"><span>${cash?'Всего внесено':'Призовой фонд'}</span><strong>${money(pool)}</strong></div>${cash?`<div class="cash-note">На выходах<br><strong>${money(g.players.reduce((n,p)=>n+(p.cashout||0),0))}</strong><br>Осталось за столом<br><strong>${money(pool-g.players.reduce((n,p)=>n+(p.cashout||0),0))}</strong></div>`:`<div class="board-prizes">${prizes.map((amount,i)=>{const winner=g.players.find(p=>p.place===i+1);return `<div class="board-prize ${i===0?'first-prize':''}"><span class="place-badge p${i}">${i===0?icon('trophy'):i+1}</span><div><span>${i===0?'Победитель':`${i+1}-е место`}</span><strong>${money(amount)}</strong>${winner?`<small>${escape(nameOf(winner))}</small>`:''}</div><small>${c.prizes[i]}%</small></div>`;}).join('')}</div>`}${!cash&&c.bountyMode!=="off"?`<div class="bounty-bank"><span>Баунти · ${c.bountyMode==="fixed"?"фиксированное":"PKO"}</span><strong>${money(bountyPoolOf(g))}</strong><small>Заработано: ${money(g.players.reduce((n,p)=>n+p.earnedBounty,0))}<br>В игре: ${money(g.players.reduce((n,p)=>n+p.bounty,0))}</small></div>`:""}<p class="prize-note">${cash?'Денежный итог считается по входам и выходам.':c.rebuy?'Ребаи и аддоны целиком идут на места. Ре-энтри пополняет фонд с резервом под новую голову.':'Призовой фонд распределяется полностью, без комиссии.'}</p></aside></div>
-  ${rosterView(g)}${eventView(g)}`;
+  const c = g.config, cash = c.mode === 'cash', level = g.levels[g.index], next = g.levels[g.index+1];
+  const alive = g.players.filter(p=>p.active).length;
+  const caption = g.finished ? 'Игра завершена' : cash ? 'Время сессии' : g.structureEnded ? 'Структура завершена' : level.kind==='break' ? 'До конца перерыва' : 'До повышения блайндов';
+  return `<div class="board-heading">
+    <div class="board-title"><a href="#" class="brand" data-action="home" aria-label="RIVER — табло"><span class="brand-symbol">♠</span>RIVER<span class="brand-dot">.</span></a><div class="board-title-name"><h1>${escape(c.name)}</h1><small>${tableLabel(new Set(g.players.map(p=>p.table)).size)} · ${cash?'Кэш':'Турнир'}</small></div></div>
+    <div class="board-tools"><span id="timer-status" class="timer-status">На паузе</span><button class="button icon-button ${state.sound ? 'on' : ''}" data-action="sound" title="${state.sound ? 'Выключить' : 'Включить'} звук" aria-label="${state.sound ? 'Выключить' : 'Включить'} звук">${icon('sound')}</button><button class="button icon-button" data-action="fullscreen" aria-label="Полный экран" title="Полный экран">${icon('expand')}</button>${gameMenu(g)}</div>
+  </div>
+  <div class="board-grid"><section class="timer-panel">
+    <div class="timer-top"><span class="pill">${cash ? 'КЭШ' : level.kind==='break'?'ПЕРЕРЫВ':`УРОВЕНЬ ${level.number}`}</span><span class="timer-caption">${caption}</span></div>
+    <div class="timer-display ${cash?'cash-timer':''} ${level.kind==='break'?'break-timer':''}" id="timer">${cash?formatTime(g.elapsed/1000,true):formatTime(g.remaining)}</div>
+    <div class="timer-progress"><div id="progress"></div></div>
+    <div class="blind-cards"><div><span>${cash?'Малый блайнд':'Текущие блайнды'}</span><small>${cash?'SB':'МБ / ББ'}</small><strong>${cash?number(c.sb):level.kind==='break'?'Перерыв':`${number(level.sb)}<i>/</i>${number(level.bb)}`}</strong>${!cash&&level.ante?`<small>BB ante ${number(level.ante)}</small>`:''}</div><div><span>${cash?'Большой блайнд':'Следующие блайнды'}</span><small>${cash?'BB':next?.kind==='break'?`${next.duration/60} минут`:'МБ / ББ'}</small><strong>${cash?number(c.bb):!next?'—':next.kind==='break'?'Перерыв':`${number(next.sb)}<i>/</i>${number(next.bb)}`}</strong>${!cash&&next?.ante?`<small>BB ante ${number(next.ante)}</small>`:''}</div></div>
+    ${g.finished?`<div class="winner-banner">${icon('trophy')} ${cash?'Сессия завершена':`Победитель — ${escape(nameOf(g.players.find(p=>p.place===1)))}`}</div>`:''}
+  </section>${prizesView(g)}</div>
+  <div class="board-controlbar"><button class="button primary play-button" data-action="play" ${g.finished||g.structureEnded?'disabled':''}>${icon(g.running?'pause':'play')}<span>${g.running?'Пауза':'Запустить'}</span></button><button class="button subtle players-button" data-action="players" aria-expanded="${playersVisible}" aria-controls="players-panel">${icon('people')}${cash?'Игроки и расчёты':'Игроки и баунти'}</button>${!cash?`<button class="button subtle next-button" data-action="next" ${g.index===g.levels.length-1||g.finished?'disabled':''}>${icon('arrow')} Следующий уровень</button>`:''}<span class="board-player-count">В игре <b>${alive}</b> из ${g.players.length}</span></div>
+  <div id="players-panel" ${playersVisible?'':'hidden'}>${playersVisible?`${rosterView(g)}${eventView(g)}`:''}</div>`;
+}
+function prizesView(g) {
+  const c=g.config,cash=c.mode==='cash',pool=poolOf(g),prizes=payouts(pool,c.prizes);
+  return `<aside class="prizes-panel panel"><div class="section-heading"><h2>${cash?'Банк игры':'Призовые'}</h2>${icon('trophy')}</div><div class="board-pool"><span>${cash?'Всего внесено':'Фонд за места'}</span><strong>${money(pool)}</strong></div>
+  ${cash?`<div class="cash-note">На выходах<br><strong>${money(g.players.reduce((n,p)=>n+(p.cashout||0),0))}</strong><br>Осталось за столом<br><strong>${money(pool-g.players.reduce((n,p)=>n+(p.cashout||0),0))}</strong></div>`:`<div class="board-prizes">${prizes.map((amount,i)=>{const winner=g.players.find(p=>p.place===i+1);return `<div class="board-prize ${i===0?'first-prize':''}"><span class="place-badge p${i}">${i===0?icon('trophy'):i+1}</span><div><span>${i+1} место</span><strong>${money(amount)}</strong>${winner?`<small>${escape(nameOf(winner))}</small>`:''}</div><small>${c.prizes[i]}%</small></div>`;}).join('')}</div>`}
+  ${!cash&&c.bountyMode==='fixed'?`<div class="bounty-bank"><span>Баунти за выбивание</span><strong>${money(c.bountyAmount)}</strong></div>`:!cash&&c.bountyMode==='progressive'?`<div class="bounty-bank progressive-bounty"><span>Прогрессивное баунти</span><strong>За каждого — своё</strong><small>Текущая награда за голову указана в списке игроков.</small><button type="button" class="text-button" data-action="players">Посмотреть награды ${icon('arrow')}</button></div>`:''}</aside>`;
 }
 function rosterView(g) {
   const c=g.config,cash=c.mode==='cash',bounty=!cash&&c.bountyMode!=='off';
-  return section('Участники игры',undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':'РЕЗУЛЬТАТЫ СОХРАНЯЮТСЯ',`<div class="roster">${g.players.map(p=>`<div class="roster-player ${!p.active?'eliminated':''}"><span class="avatar">${escape(initials(p))}</span><div class="roster-name"><strong>${escape(nameOf(p))}</strong><small>${p.place?`${p.place}-е место`:`Стол ${p.table} · место ${p.seat}`} · вход ${money(p.invested)}</small>${!cash?`<small>Выбил: ${p.knockouts} · Р: ${p.rebuys} · РЭ: ${p.reentries} · А: ${p.addons}</small>`:''}${bounty?`<small class="bounty-line">Голова ${money(p.bounty)} · выиграл ${money(p.earnedBounty)}</small>`:''}${cash&&p.cashout!==null?`<small class="${p.cashout-p.invested>=0?'profit':'loss'}">Итог ${p.cashout-p.invested>0?'+':''}${money(p.cashout-p.invested)}</small>`:''}${g.finished&&!cash?`<small class="profit">К выплате ${money((payouts(poolOf(g),c.prizes)[p.place-1]||0)+p.earnedBounty)}</small>`:''}</div><div class="player-actions">${p.active&&!g.finished?`${cash||c.rebuy?`<button class="mini-button" data-action="rebuy" data-id="${p.id}" aria-label="${cash?'Добавить вход':'Ребай'}: ${escape(nameOf(p))}" title="${cash?'Вход':'Ребай'}">+</button>`:''}${!cash?`<button class="mini-button addon-button" data-action="addon" data-id="${p.id}" aria-label="Аддон: ${escape(nameOf(p))}" title="Аддон">A</button>`:''}<button class="mini-button" data-action="${cash?'cashout':'bust'}" data-id="${p.id}" aria-label="${cash?'Выход':'Выбыл'}: ${escape(nameOf(p))}" title="${cash?'Выход':'Выбыл'}">${cash?'↗':'×'}</button>`:p.place===1?'<span class="winner-crown">♛</span>':!cash&&!p.active&&c.reentry?`<button class="mini-button" data-action="reentry" data-id="${p.id}" aria-label="Ре-энтри: ${escape(nameOf(p))}" title="Ре-энтри">↻</button>`:''}</div></div>`).join('')}</div>${!cash?'<p class="field-hint">Р — ребаи · РЭ — ре-энтри · А — аддоны. Кнопки: + ребай, A аддон, × выбывание, ↻ ре-энтри. При ре-энтри места пересчитываются.</p>':''}`,'roster-panel');
+  return section('Участники игры',undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':'РЕЗУЛЬТАТЫ СОХРАНЯЮТСЯ',`<div class="roster">${g.players.map(p=>`<div class="roster-player ${!p.active?'eliminated':''}"><span class="avatar">${escape(initials(p))}</span><div class="roster-name"><strong>${escape(nameOf(p))}</strong><small>${p.place?`${p.place}-е место`:`Стол ${p.table} · место ${p.seat}`} · вход ${money(p.invested)}</small>${!cash?`<small>Выбил: ${p.knockouts} · Р: ${p.rebuys} · РЭ: ${p.reentries} · А: ${p.addons}</small>`:''}${bounty?`<small class="bounty-line">Голова ${money(p.bounty)} · выиграл ${money(p.earnedBounty)}</small>`:''}${cash&&p.cashout!==null?`<small class="${p.cashout-p.invested>=0?'profit':'loss'}">Итог ${p.cashout-p.invested>0?'+':''}${money(p.cashout-p.invested)}</small>`:''}${g.finished&&!cash?`<small class="profit">К выплате ${money((payouts(poolOf(g),c.prizes)[p.place-1]||0)+p.earnedBounty)}</small>`:''}</div><div class="player-actions">${p.active&&!g.finished?`${cash||c.rebuy?`<button class="mini-button" data-action="rebuy" data-id="${p.id}" aria-label="${cash?'Добавить вход':'Ребай'}: ${escape(nameOf(p))}" title="${cash?'Вход':'Ребай'}"><span aria-hidden="true">+</span> ${cash?'Вход':'Ребай'}</button>`:''}${!cash?`<button class="mini-button addon-button" data-action="addon" data-id="${p.id}" aria-label="Аддон: ${escape(nameOf(p))}" title="Аддон"><span aria-hidden="true">+</span> Аддон</button>`:''}<button class="mini-button" data-action="${cash?'cashout':'bust'}" data-id="${p.id}" aria-label="${cash?'Выход':'Выбыл'}: ${escape(nameOf(p))}" title="${cash?'Выход':'Выбыл'}"><span aria-hidden="true">${cash?'↗':'×'}</span> ${cash?'Выход':'Выбыл'}</button>`:p.place===1?'<span class="winner-crown">♛</span>':!cash&&!p.active&&c.reentry?`<button class="mini-button" data-action="reentry" data-id="${p.id}" aria-label="Ре-энтри: ${escape(nameOf(p))}" title="Ре-энтри"><span aria-hidden="true">↻</span> Ре-энтри</button>`:''}</div></div>`).join('')}</div>${!cash?'<p class="field-hint">Р — ребаи · РЭ — ре-энтри · А — аддоны. При ре-энтри места пересчитываются.</p>':''}`,'roster-panel');
 }
 function eventView(g) {
   if(!g.events?.length)return '';
@@ -175,6 +205,7 @@ function beep() {
 }
 function modal(title, content, button, onConfirm) {
   const dialog = $('#modal');
+  dialog.classList.remove('structure-modal');
   dialog.innerHTML = `<form id="modal-form"><div class="modal-heading"><h2>${title}</h2><button class="mini-button" type="button" data-action="close" aria-label="Закрыть">×</button></div>${content}<div class="modal-actions"><button type="button" class="button subtle" data-action="close">Отмена</button><button class="button primary" type="submit">${button}</button></div></form>`;
   $('#modal-form').onsubmit = event => { event.preventDefault(); if (onConfirm(new FormData(event.currentTarget)) !== false) dialog.close(); };
   dialog.showModal();
@@ -186,17 +217,52 @@ function begin() {
   state.seats.forEach(p=>{p.name=p.name.trim();p.nick=p.nick.trim();});
   if (state.seats.some(p=>!p.name)) return toast('Заполните имена всех игроков');
   if (new Set(state.seats.map(p=>p.name.toLocaleLowerCase())).size!==state.seats.length) return toast('Один игрок указан дважды. Проверьте имена.');
-  const error=validateConfig(state.config); if(error) return toast(error);
+  const error=setupError(); if(error) return toast(error);
   rememberPlayers();
-  state.game=createGame(state.config,levels(),state.seats); undo=null; go('board');
+  state.game=createGame(state.config,levels(),state.seats); undo=null;playersVisible=false; go('board');
 }
 function saveUndo() { undo=structuredClone(state.game); }
+function editorRows(rows) {
+  return `<div class="level-editor-row headings"><span>Уровень</span><span>SB</span><span>BB</span><span>Мин.</span></div>${rows.map((l,i)=>`<div class="level-editor-row"><span>${l.kind==='break'?'Перерыв':`# ${l.number}`}</span>${l.kind==='break'?'<span>—</span><span>—</span>':`<input aria-label="SB уровня ${l.number}" name="sb-${i}" type="number" min="1" max="100000000" value="${l.sb}" required><input aria-label="BB уровня ${l.number}" name="bb-${i}" type="number" min="2" max="100000000" value="${l.bb}" required>`}<input aria-label="Минуты ${l.kind==='break'?'перерыва':`уровня ${l.number}`}" name="duration-${i}" type="number" min="1" max="180" value="${l.duration/60}" required></div>`).join('')}`;
+}
 function showStructure() {
-  const rows=structuredClone(levels());
-  modal('Структура турнира', `<p class="field-hint">Блайнды и длительность можно изменить для каждого уровня.</p><div class="level-editor"><div class="level-editor-row headings"><span>Уровень</span><span>SB</span><span>BB</span><span>Мин.</span></div>${rows.map((l,i)=>`<div class="level-editor-row"><span>${l.kind==='break'?'Перерыв':`# ${l.number}`}</span>${l.kind==='break'?'<span>—</span><span>—</span>':`<input aria-label="SB уровня ${l.number}" name="sb-${i}" type="number" min="1" max="100000000" value="${l.sb}" required><input aria-label="BB уровня ${l.number}" name="bb-${i}" type="number" min="2" max="100000000" value="${l.bb}" required>`}<input aria-label="Минуты ${l.kind==='break'?'перерыва':`уровня ${l.number}`}" name="duration-${i}" type="number" min="1" max="180" value="${l.duration/60}" required></div>`).join('')}</div>`, 'Сохранить', data=>{
-    for(let i=0;i<rows.length;i++){const l=rows[i];l.duration=Number(data.get(`duration-${i}`))*60;if(l.kind==='level'){l.sb=Number(data.get(`sb-${i}`));l.bb=Number(data.get(`bb-${i}`));l.ante=state.config.ante?l.bb:0;if(l.sb>=l.bb){toast(`Уровень ${l.number}: BB должен быть больше SB`);return false;}}}
-    state.levels=rows; state.config.sb=rows[0].sb;state.config.bb=rows[0].bb;store();render();
+  let rows;
+  try { rows=structuredClone(levels()); } catch { rows=makeLevels(state.config); }
+  const options={targetMinutes:240,extraEntries:0,addons:0,...state.plannerOptions,...state.autoStructure};
+  let autoOptions=state.autoStructure ? {...state.autoStructure} : null;
+  const c=state.config;
+  modal('Структура турнира', `<div class="structure-planner"><h3>Подобрать под ваш вечер</h3><p>Стек ${number(c.stack)} · ${c.seats} игроков · старт ${number(c.sb)} / ${number(c.bb)}. Уровни около ${c.duration} мин${c.breakEvery?`, перерыв ${c.breakDuration} мин каждые ${c.breakEvery} уровня`:`, без перерывов`}.</p><div class="planner-time">${numeric('Желаемая длительность турнира','targetMinutes',options.targetMinutes,'мин',30,1440)}<button type="button" class="button primary" id="calculate-structure">Рассчитать</button></div><details class="planner-extras"><summary>Планируемые докупки и аддоны</summary><p class="field-hint">Необязательно. Укажите суммарное количество за весь турнир, а не на одного игрока.</p><div class="fields two">${numeric('Ребаи и ре-энтри','extraEntries',options.extraEntries,'шт.',0,1000)}${numeric('Аддоны','addons',options.addons,'шт.',0,1000)}</div></details><div id="plan-summary" class="plan-summary" aria-live="polite"></div></div><p class="field-hint">Это ориентир, а не точное время окончания. Темп игры и фактические докупки повлияют на длительность. Любой уровень можно отредактировать.</p><div class="level-editor">${editorRows(rows)}</div>`, 'Сохранить', data=>{
+    if (autoOptions && JSON.stringify(readOptions()) !== JSON.stringify(autoOptions)) { toast('Параметры изменились. Нажмите «Рассчитать» перед сохранением'); return false; }
+    for(let i=0;i<rows.length;i++) {
+      const l=rows[i];l.duration=Number(data.get(`duration-${i}`))*60;
+      if(l.kind==='level') { l.sb=Number(data.get(`sb-${i}`));l.bb=Number(data.get(`bb-${i}`));l.ante=c.ante?l.bb:0;
+        if(l.sb>=l.bb){toast(`Уровень ${l.number}: BB должен быть больше SB`);return false;}
+      }
+    }
+    state.plannerOptions=readOptions();
+    if(autoOptions) { state.autoStructure=autoOptions;delete state.levels; }
+    else { delete state.autoStructure;state.levels=rows;state.config.sb=rows[0].sb;state.config.bb=rows[0].bb; }
+    store();render();
   });
+  $('#modal').classList.add('structure-modal');
+  const readOptions=()=>Object.fromEntries(['targetMinutes','extraEntries','addons'].map(key=>[key,Number($(`#modal [name="${key}"]`).value)]));
+  const showPlan=plan=>{
+    const durations=plan.levels.filter(l=>l.kind==='level').map(l=>l.duration/60),min=Math.min(...durations),max=Math.max(...durations);
+    $('#plan-summary').innerHTML=`<strong>${durations.length} уровней по ${min===max?min:`${min}–${max}`} мин · всего ${plan.targetMinutes} мин</strong><span>Игра ${plan.playingMinutes} мин + перерывы ${plan.breakMinutes} мин. В расчёте ${number(plan.chips)} фишек.</span><span>Финальный BB ${number(plan.finalBB)}: ориентир — около 20 BB во всех фишках турнира.</span>${plan.maxIncrease>2?'<span class="plan-warning">Для такого срока блайнды местами растут больше чем вдвое. Увеличьте время турнира или сократите уровни в настройках для более плавной игры.</span>':''}${plan.startDepth<30?'<span class="plan-warning">На старте меньше 30 BB. Для более глубокой игры уменьшите стартовые блайнды.</span>':''}`;
+  };
+  if(autoOptions) { try { showPlan(recommendStructure(c,autoOptions)); } catch(error) { $('#plan-summary').textContent=error.message; } }
+  else $('#plan-summary').textContent=`Текущая структура: ${rows.reduce((sum,l)=>sum+l.duration,0)/60} мин с перерывами. Нажмите «Рассчитать», чтобы получить предложение.`;
+  $('#calculate-structure').onclick=()=>{
+    for(const el of document.querySelectorAll('.structure-planner input')) if(!el.reportValidity())return;
+    try {
+      const nextOptions=readOptions(), plan=recommendStructure(c,nextOptions);
+      rows=plan.levels;autoOptions=nextOptions;$('.level-editor').innerHTML=editorRows(rows);showPlan(plan);
+    } catch(error) { $('#plan-summary').textContent=error.message; }
+  };
+  $('#modal-form').oninput=event=>{
+    if(event.target.closest('.level-editor')) { autoOptions=null;$('#plan-summary').textContent='Ручная структура: ваши правки будут сохранены. Для нового автоподбора нажмите «Рассчитать».'; }
+    else $('#plan-summary').textContent='Параметры изменены. Нажмите «Рассчитать», чтобы обновить предложение.';
+  };
 }
 
 document.addEventListener('input', event=>{
@@ -208,6 +274,8 @@ document.addEventListener('input', event=>{
     else state.config[name]=el.type==='checkbox'?el.checked:el.type==='number'||(el.tagName==='SELECT'&&name!=='bountyMode')?Number(el.value):el.value;
     if(['sb','bb','duration','breakEvery','breakDuration','ante'].includes(name)) delete state.levels;
     $('#summary').innerHTML=summaryView();
+    if($('#structure-label')) $('#structure-label').textContent=structureLabel();
+    if($('#structure-hint')) $('#structure-hint').textContent=structureHint();
     if ($('#table-plan')) $('#table-plan').textContent=planDescription();
     if($('#prize-total')) {const total=state.config.prizes.reduce((a,b)=>a+b,0);$('#prize-total').textContent=`Всего ${total}% из 100%`;$('#prize-total').classList.toggle('error',total!==100);}
     store();
@@ -226,7 +294,7 @@ document.addEventListener('change',event=>{
   if(event.target.name==='prizeCount') {const templates={1:[100],2:[65,35],3:[50,30,20],4:[45,25,20,10],5:[40,25,15,12,8]};state.config.prizes=templates[event.target.value];store();render();}
 });
 document.addEventListener('submit',event=>{
-  if(event.target.id==='settings-form'){event.preventDefault();const error=validateConfig(state.config);if(error)return toast(error);go('seating');}
+  if(event.target.id==='settings-form'){event.preventDefault();const error=setupError();if(error)return toast(error);go('seating');}
   if(event.target.id==='seating-form'){event.preventDefault();if(state.game)go('board');else begin();}
 });
 document.addEventListener('click',async event=>{
@@ -234,14 +302,15 @@ document.addEventListener('click',async event=>{
   const action=button.dataset.action,g=state.game;
   if(action==='close')return $('#modal').close();
   if(action==='home'){event.preventDefault();return go(g?'board':'settings');}
-  if(action==='nav'){if(button.dataset.step==='seating'&&!g){const error=validateConfig(state.config);if(error)return toast(error);}return go(button.dataset.step);}
+  if(action==='nav'){if(button.dataset.step==='seating'&&!g){const error=setupError();if(error)return toast(error);}return go(button.dataset.step);}
   if(action==='mode'){state.config.mode=button.dataset.mode;store();return render();}
   if(action==='structure')return showStructure();
+  if(action==='players'){playersVisible=!playersVisible;render();if(playersVisible)$('#players-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(action==='select-table'){selectedTable=Number(button.dataset.table);$('#table-visual').innerHTML=tableVisual();return;}
   if(action==='shuffle'){for(let i=state.seats.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[state.seats[i],state.seats[j]]=[state.seats[j],state.seats[i]];}store();return render();}
   if(action==='suggest'){const p=state.library.find(p=>p.id===button.dataset.id);state.seats[Number(button.dataset.seat)]={...p};store();return render();}
-  if(action==='demo'){state.config=defaults();state.seats=['Александр','Михаил','Анна','Дмитрий','Мария','Артём'].map((name,i)=>({id:uid(),name,nick:['Alex','Misha','Anna','Dima','Mary','Art'][i]}));delete state.levels;state.game=createGame(state.config,levels(),state.seats);state.game.remaining=17*60+42;undo=null;return go('board');}
-  if(action==='new')return modal('Новая игра', '<p>Текущая игра будет заменена. Сохранённые имена останутся в вашей компании.</p>', 'Создать игру', ()=>{state.game=null;undo=null;delete state.levels;go('settings');});
+  if(action==='demo'){state.config=defaults();state.seats=['Александр','Михаил','Анна','Дмитрий','Мария','Артём'].map((name,i)=>({id:uid(),name,nick:['Alex','Misha','Anna','Dima','Mary','Art'][i]}));delete state.levels;delete state.autoStructure;state.game=createGame(state.config,levels(),state.seats);state.game.remaining=17*60+42;undo=null;return go('board');}
+  if(action==='new')return modal('Новая игра', '<p>Текущая игра будет заменена. Сохранённые имена останутся в вашей компании.</p>', 'Создать игру', ()=>{state.game=null;undo=null;playersVisible=false;delete state.levels;delete state.autoStructure;go('settings');});
   if(action==='sound'){state.sound=!state.sound;store();if(state.sound)beep();return render();}
   if(action==='fullscreen'){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{toast('Полноэкранный режим недоступен в этом браузере');}return;}
   if(!g)return;

@@ -64,3 +64,128 @@
 .game-menu-content>button:hover{background:#2c3b22}
 .game-menu-content .divider{margin:8px 0}
 @media(max-width:620px){.board-heading{flex-wrap:wrap;align-items:flex-start}.board-tools{margin-left:auto}.game-menu-content{width:230px}}
+
+/* The shared display prioritizes the timer; player operations open on demand. */
+.board-page main{min-height:0}
+.board-heading{padding:24px 0;gap:20px}
+.board-title{display:flex;align-items:center;gap:24px;min-width:0}
+.board-title .brand{font-size:28px;flex-shrink:0}
+.board-title-name{border-left:1px solid #506046;padding-left:24px;min-width:0}
+.board-title h1{margin:0;font-size:clamp(18px,2.4vw,32px);font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.board-title-name>small{display:block;color:#839573;font-size:9px;margin-top:5px}
+.board-tools{align-items:center;flex-shrink:0}
+.board-tools .timer-status{font-size:12px;margin-right:10px;white-space:nowrap;color:#d2dfc8}
+.board-tools .timer-status:before{width:8px;height:8px}
+.board-tools .icon-button{background:transparent;border-color:transparent}
+.board-grid{grid-template-columns:minmax(0,1fr) minmax(275px,31%);gap:18px;align-items:stretch}
+.timer-panel{display:flex;flex-direction:column;padding:26px 26px 0}
+.timer-top{justify-content:flex-start;gap:20px}
+.timer-top .pill{font-size:12px;padding:10px 13px;border-radius:9px;white-space:nowrap}
+.timer-caption{font-size:clamp(12px,1.6vw,22px);font-weight:600;text-align:center;flex:1}
+.timer-display{font-size:clamp(100px,22vw,360px);font-weight:600;letter-spacing:-.07em;margin:15px -10px 24px;line-height:1.15}
+.timer-display.cash-timer{font-size:clamp(70px,14vw,240px);margin:30px -10px}
+.timer-progress{height:12px;flex-shrink:0;margin-bottom:25px}
+.blind-cards{padding:25px 0 24px;margin-top:auto;gap:18px}
+.blind-cards>div>span{font-size:clamp(12px,1.6vw,22px);font-weight:700;color:#e3ebda}
+.blind-cards>div>small{display:block;font-size:clamp(10px,1.1vw,16px);margin-top:7px;color:#98a58e}
+.blind-cards strong{font-size:clamp(27px,4.2vw,62px);font-weight:600;letter-spacing:-1.5px;margin:8px 0 0}
+.blind-cards>div+div strong{color:#dde8d3}
+.blind-cards strong i{font-weight:400;color:#a8b39f;margin:0 9px}
+.board-grid .prizes-panel{padding:24px 22px}
+.prizes-panel .section-heading{margin-bottom:22px}
+.prizes-panel .section-heading h2{font-size:clamp(20px,2vw,29px);font-weight:700}
+.prizes-panel .section-heading>svg{width:25px;height:25px}
+.board-pool{border:0;padding:0;margin:0 0 20px}
+.board-pool>span{font-size:clamp(12px,1.3vw,18px)}
+.board-pool>strong{font-size:clamp(30px,3.5vw,51px);font-weight:600;margin-top:4px}
+.board-prizes{gap:0}
+.board-prize{padding:17px 6px;gap:13px}
+.board-prize .place-badge{width:33px;height:33px;font-size:14px;flex-shrink:0}
+.board-prize>div>span{font-size:clamp(12px,1.2vw,17px)}
+.board-prize strong{font-size:clamp(24px,2.7vw,38px);font-weight:600;margin-top:4px;white-space:nowrap}
+.board-prize>small{font-size:13px;align-self:flex-start;margin-top:4px}
+.board-prize.first-prize{padding:16px 11px}
+.bounty-bank{margin-top:20px;padding-top:18px}
+.bounty-bank>span{font-size:clamp(12px,1.4vw,19px);color:#a4b496}
+.bounty-bank>strong{font-size:clamp(30px,3.4vw,48px);font-weight:600;margin-top:5px}
+.progressive-bounty>strong{font-size:21px;font-weight:500;line-height:1.4;margin-top:10px}
+.progressive-bounty>small{font-size:11px;line-height:1.7}
+.progressive-bounty .text-button{display:flex;align-items:center;gap:8px;font-size:11px;padding:0;margin-top:12px}
+.progressive-bounty svg{width:14px}
+.board-controlbar{display:flex;align-items:center;gap:14px;margin:22px 0 28px}
+.board-controlbar .button{padding:17px 20px;font-size:14px;white-space:nowrap}
+.board-controlbar .play-button{min-width:150px;font-size:17px}
+.board-controlbar .button svg{width:21px;height:21px}
+.board-player-count{margin-left:auto;font-size:16px;color:#a5b598;white-space:nowrap}
+.board-player-count b{font-weight:600;color:#dce8d2}
+.menu-elapsed{color:#809673;font-size:10px;padding:14px 6px;display:flex;justify-content:space-between;gap:8px}
+.menu-elapsed b{font-weight:500;color:#c1d1b3}
+#players-panel[hidden]{display:none}
+#players-panel{scroll-margin-top:20px}
+.structure-modal{width:700px;max-height:calc(100dvh - 32px);overflow:auto}
+.structure-planner{padding:18px;border:1px solid #465b37;border-radius:12px;background:#202b1a}
+.structure-planner h3{margin:0;font-size:16px;font-weight:600}
+.structure-planner p{font-size:11px;margin:10px 0 16px}
+.planner-time{display:flex;align-items:flex-end;gap:12px}
+.planner-time .field{flex:1;min-width:0}
+.planner-time .button{min-height:45px;padding:13px 18px;font-size:12px}
+.planner-extras{margin:17px 0 0;font-size:11px;color:#a9ba9b}
+.planner-extras summary{cursor:pointer}
+.plan-summary{display:grid;gap:7px;margin-top:16px;font-size:11px;line-height:1.7;color:#a8bb99}
+.plan-summary strong{font-size:13px;color:#d7e8c8;font-weight:500}
+.plan-summary .plan-warning{color:#e6c291}
+.structure-modal .level-editor{max-height:35vh}
+.structure-modal .modal-actions{position:sticky;bottom:-28px;padding:18px 0;background:#1a2117;margin-top:10px}
+.roster{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.roster .roster-player{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:16px}
+.roster-name strong{font-size:13px}
+.roster-name small,.roster-name .bounty-line{font-size:10px;line-height:1.5}
+.roster .player-actions{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-width:none;width:100%;padding-top:3px}
+.player-actions .mini-button{width:auto;min-height:44px;height:auto;display:flex;align-items:center;justify-content:center;gap:5px;border-radius:7px;font-size:11px;line-height:1.3;font-weight:500;padding:8px 5px;background:#20362b;color:#b6ddbf;border-color:#3d6950}
+.player-actions .mini-button>span{font-size:17px}
+.player-actions .mini-button:hover{background:#2d4a39}
+.player-actions [data-action="addon"]{background:#2e263b;border-color:#65517e;color:#d7c5ef}
+.player-actions [data-action="addon"]:hover{background:#433454}
+.player-actions [data-action="bust"]{background:#3c2527;border-color:#815155;color:#f0b9b9}
+.player-actions [data-action="bust"]:hover{background:#553234}
+.player-actions [data-action="reentry"]{background:#2c4520;border-color:#779b55;color:#d5edb8}
+.player-actions [data-action="reentry"]:hover{background:#3c5b2b}
+.player-actions [data-action="cashout"]{background:#403724;border-color:#847044;color:#eddaa8}
+.player-actions [data-action="cashout"]:hover{background:#55492e}
+.player-actions>:only-child{grid-column:1/-1}
+.player-actions .mini-button:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+.player-actions .winner-crown{text-align:right}
+:fullscreen footer{display:none}
+@media(max-width:1100px){
+  .board-title{gap:15px}.board-title-name{padding-left:15px}
+  .board-title .brand{font-size:23px}.board-title .brand-symbol{width:32px;height:36px;font-size:25px}
+  .board-tools .timer-status{font-size:10px;margin-right:0}
+  .board-grid{grid-template-columns:minmax(0,1fr) 275px}
+  .timer-panel{padding:20px 20px 0}.timer-top{gap:12px}.timer-top .pill{font-size:10px;padding:9px 11px}
+  .timer-display{font-size:21vw}.timer-display.cash-timer{font-size:13vw}
+  .board-controlbar{gap:10px}.board-controlbar .button{padding:15px 14px;font-size:12px}
+  .board-controlbar .play-button{min-width:125px;font-size:15px}.board-player-count{font-size:13px}
+  .board-grid .prizes-panel{padding:22px 18px}
+  .winner-banner{margin-left:-20px;margin-right:-20px}
+}
+@media(max-width:760px){
+  .board-heading{flex-wrap:wrap;gap:16px}.board-title{flex:1}.board-tools{margin-left:auto}
+  .board-grid{grid-template-columns:1fr}
+  .timer-display{font-size:31vw;max-height:none}
+  .timer-display.cash-timer{font-size:21vw}
+  .blind-cards strong{font-size:7vw}
+  .board-controlbar{flex-wrap:wrap}.board-player-count{padding:7px 0}
+  .board-controlbar .button{flex:1}
+  .prizes-panel{grid-row:2}
+}
+@media(max-width:480px){
+  .board-title .brand{font-size:21px}.board-title{gap:12px}.board-title-name{padding-left:12px}
+  .board-title h1{font-size:18px}.board-heading{padding:20px 0}
+  .board-tools{gap:6px}.board-tools .timer-status{margin-right:8px}
+  .timer-top{gap:8px}.timer-caption{font-size:11px}.timer-top .pill{font-size:9px}
+  .timer-panel{padding:18px 16px 0}.timer-display{margin-top:20px;margin-bottom:20px}
+  .timer-progress{height:9px;margin-bottom:18px}.blind-cards{gap:12px;padding:20px 0}
+  .blind-cards>div>span{font-size:11px}.blind-cards strong i{margin:0 5px}
+  .board-controlbar .button{font-size:12px;padding:14px 12px}
+  .board-controlbar .next-button{flex-basis:60%}.board-player-count{font-size:12px}
+}
