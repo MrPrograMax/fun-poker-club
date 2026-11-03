@@ -193,9 +193,23 @@ function playerActions(g, p) {
   if(!cash&&!p.active&&g.config.reentry)return `<button class="mini-button" data-action="reentry" data-id="${p.id}" aria-label="Ре-энтри: ${name}"><span aria-hidden="true">↻</span> Ре-энтри</button>`;
   return '';
 }
+function playerCard(g, p) {
+  const c=g.config, cash=c.mode==='cash', bounty=!cash&&c.bountyMode!=='off';
+  const seat=p.place?`${p.place}-е место`:`Стол ${p.table} · место ${p.seat}`;
+  const stat=(label,value)=>`<div><dt>${label}</dt><dd>${value}</dd></div>`;
+  const result=cash&&p.cashout!==null?p.cashout-p.invested:null;
+  const payout=g.finished&&!cash?(payouts(poolOf(g),c.prizes)[p.place-1]||0)+p.earnedBounty:null;
+  return `<article class="roster-player ${!p.active?'eliminated':''}" aria-label="Игрок ${escape(nameOf(p))}">
+    <div class="player-card-header"><div class="player-identity"><span class="avatar">${escape(initials(p))}</span><div class="roster-name"><strong>${escape(nameOf(p))}</strong><small>${seat}</small></div></div><div class="player-investment"><span>Внесено</span><strong>${money(p.invested)}</strong></div></div>
+    ${bounty?`<dl class="player-bounty">${stat('За голову',money(p.bounty))}${stat('За выбивания',money(p.earnedBounty))}</dl>`:''}
+    ${result!==null?`<dl class="player-cash-result">${stat('На выходе',money(p.cashout))}${stat('Итог',`<span class="${result>=0?'profit':'loss'}">${result>0?'+':''}${money(result)}</span>`)}</dl>`:''}
+    <div class="player-card-footer">${!cash?`<dl class="player-stats">${stat('Выбил',p.knockouts)}${stat('Ре-энтри',p.reentries)}${stat('Аддоны',p.addons)}</dl>`:'<span class="player-cash-status">'+(p.active?'За столом':'Расчёт записан')+'</span>'}<div class="player-actions ${cash?'cash-actions':'tournament-actions'}">${playerActions(g,p)}</div></div>
+    ${p.rebuys&&!cash?`<div class="player-legacy">Докупки ранее <b>${p.rebuys}</b></div>`:''}
+    ${payout!==null?`<div class="player-payout"><span>К выплате</span><strong>${money(payout)}</strong></div>`:''}
+  </article>`;
+}
 function rosterView(g) {
-  const c=g.config,cash=c.mode==='cash',bounty=!cash&&c.bountyMode!=='off';
-  return section('Участники игры',undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':'РЕЗУЛЬТАТЫ СОХРАНЯЮТСЯ',`<div class="roster">${g.players.map(p=>`<div class="roster-player ${!p.active?'eliminated':''}"><span class="avatar">${escape(initials(p))}</span><div class="roster-name"><strong>${escape(nameOf(p))}</strong><small>${p.place?`${p.place}-е место`:`Стол ${p.table} · место ${p.seat}`} · вход ${money(p.invested)}</small>${!cash?`<small>Выбил: ${p.knockouts} · Ре-энтри: ${p.reentries} · Аддоны: ${p.addons}</small>${p.rebuys?`<small>Докупки ранее: ${p.rebuys}</small>`:''}`:''}${bounty?`<small class="bounty-line">Голова ${money(p.bounty)} · выиграл ${money(p.earnedBounty)}</small>`:''}${cash&&p.cashout!==null?`<small class="${p.cashout-p.invested>=0?'profit':'loss'}">Итог ${p.cashout-p.invested>0?'+':''}${money(p.cashout-p.invested)}</small>`:''}${g.finished&&!cash?`<small class="profit">К выплате ${money((payouts(poolOf(g),c.prizes)[p.place-1]||0)+p.earnedBounty)}</small>`:''}</div><div class="player-actions ${cash?'cash-actions':'tournament-actions'}">${playerActions(g,p)}</div></div>`).join('')}</div>${!cash?'<p class="field-hint">Ре-энтри доступен после выбывания. Аддон — в меню «⋯» у активного игрока.</p>':''}`,'roster-panel');
+  return section('Участники игры',undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':'',`<div class="roster">${g.players.map(p=>playerCard(g,p)).join('')}</div>${g.config.mode==='tournament'?'<p class="field-hint">Ре-энтри доступен после выбывания. Аддон — в меню «⋯» у активного игрока.</p>':''}`,'roster-panel');
 }
 
 function eventView(g) {

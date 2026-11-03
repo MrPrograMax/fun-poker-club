@@ -136,13 +136,31 @@
 .plan-summary .plan-warning{color:#e6c291}
 .structure-modal .level-editor{max-height:35vh}
 .structure-modal .modal-actions{position:sticky;bottom:-28px;padding:18px 0;background:#1a2117;margin-top:10px}
-.roster{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
-.roster .roster-player{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:16px}
-.roster-name strong{font-size:13px}
-.roster-name small,.roster-name .bounty-line{font-size:10px;line-height:1.5}
-.roster .player-actions{grid-column:1/-1;display:flex;justify-content:flex-end;justify-self:end;gap:8px;max-width:none;width:auto;padding-top:5px}
+.roster{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start;gap:14px}
+.roster .roster-player{display:flex;flex-direction:column;gap:0;padding:17px 18px;border-radius:13px;background:#121b14}
+.player-card-header{display:flex;justify-content:space-between;align-items:center;gap:14px;width:100%;min-width:0}
+.player-identity{display:flex;align-items:center;gap:10px;min-width:0}
+.roster .avatar{margin:0;width:34px;height:34px;font-size:11px;background:#2b3926}
+.roster-name strong{font-size:14px;font-weight:600;line-height:1.4}
+.roster-name small{font-size:10px;line-height:1.5;margin-top:3px;color:#819179}
+.player-investment{text-align:right;flex-shrink:0}
+.player-investment>span{display:block;font-size:9px;color:#7d8d74;margin-bottom:4px}
+.player-investment>strong{font-size:13px;font-weight:500;color:#d0dcc5;font-variant-numeric:tabular-nums}
+.player-card-footer{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;width:100%;margin-top:14px;padding-top:13px;border-top:1px solid #2b3726}
+.player-stats{display:flex;gap:15px;margin:0;flex-shrink:0}
+.player-stats dt{font-size:9px;font-weight:400;color:#7f9075;white-space:nowrap}
+.player-stats dd{margin:4px 0 0;font-size:14px;font-weight:500;line-height:1.2;color:#cedcc3;font-variant-numeric:tabular-nums}
+.player-bounty,.player-cash-result{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;margin:14px 0 0;padding:10px 12px;border-radius:8px;background:#c2d9a708}
+.player-bounty dt,.player-cash-result dt{font-size:9px;color:#8c9f80}
+.player-bounty dd,.player-cash-result dd{margin:5px 0 0;font-size:13px;color:#c5dfa9;font-variant-numeric:tabular-nums}
+.player-cash-status{font-size:10px;color:#8e9f80}
+.player-legacy{display:flex;align-items:center;gap:7px;margin-top:10px;color:#839477;font-size:9px}
+.player-legacy b{font-weight:500;color:#b4c5a6}
+.player-payout{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin-top:12px;padding-top:12px;border-top:1px solid #3d4a32;font-size:10px;color:#a6ba94}
+.player-payout strong{font-size:15px;font-weight:500;color:var(--accent)}
+.roster .player-actions{display:flex;justify-content:flex-end;gap:7px;max-width:none;width:auto;margin-left:auto;padding:0;flex-shrink:0}
 .player-actions .mini-button{width:auto;min-height:38px;height:auto;display:flex;align-items:center;justify-content:center;gap:5px;border-radius:8px;font-size:11px;line-height:1.3;font-weight:500;padding:8px 14px;background:#20362b;color:#b6ddbf;border-color:#3d6950}
-.player-actions>.mini-button{min-width:100px}
+.player-actions>.mini-button{min-width:88px}
 .player-actions .mini-button>span{font-size:17px}
 .player-actions .mini-button:hover{background:#2d4a39}
 .player-actions [data-action="addon"]{background:#2e263b;border-color:#65517e;color:#d7c5ef}
