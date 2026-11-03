@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, addonsRemaining, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
@@ -36,8 +36,10 @@ test('manual level switch resets duration but preserves paused state',()=>{
 test('elimination assigns places and stops timer when winner remains',()=>{
   const g=game();toggleClock(g,0);eliminate(g,'2',100);assert.equal(g.players[1].place,3);eliminate(g,'2',200);assert.equal(g.players[1].place,3);eliminate(g,'1',300);assert.equal(g.players[0].place,2);assert.equal(g.players[2].place,1);assert.equal(g.finished,true);assert.equal(g.running,false);
 });
-test('rebuy changes prize pool without changing player count',()=>{
-  const g=game();addEntry(g,'2','rebuy');assert.equal(poolOf(g),4000);assert.deepEqual(payouts(poolOf(g),g.config.prizes),[2000,1200,800]);assert.equal(g.players.length,3);
+test('tournaments reject rebuy operations and reentry for active players without changing funds',()=>{
+  const g=game(),before=structuredClone(g);
+  assert.throws(()=>addEntry(g,'2','rebuy'));assert.throws(()=>addEntry(g,'2','reentry'));
+  assert.deepEqual(g,before);
 });
 test('timer formatting is never negative and supports hours',()=>{
   assert.equal(formatTime(-1),'00:00');assert.equal(formatTime(59.1),'01:00');assert.equal(formatTime(3601),'01:00:01');
@@ -64,7 +66,7 @@ test('re-entry reserves a new bounty from the same payment, addon goes entirely 
   const g=game({bountyMode:'progressive'});eliminate(g,'2',10,'1');addEntry(g,'2','reentry',20);
   assert.equal(g.players[1].invested,2000);assert.equal(g.players[1].bounty,200);assert.equal(g.players[1].reentries,1);assert.equal(poolOf(g),3200);assert.equal(bountyPoolOf(g),800);assertBankBalances(g);
   addEntry(g,'2','addon',30);assert.equal(poolOf(g),3700);assert.equal(bountyPoolOf(g),800);assert.equal(g.players[1].addons,1);assertBankBalances(g);
-  addEntry(g,'1','rebuy',40);assert.equal(poolOf(g),4700);assert.equal(g.players[0].bounty,300);assertBankBalances(g);
+  addEntry(g,'1','addon',40);assert.equal(poolOf(g),4200);assert.equal(g.players[0].bounty,300);assertBankBalances(g);
 });
 test('reopening a finished tournament reverses only the winner own-head award',()=>{
   const g=game({bountyMode:'progressive'});eliminate(g,'2',10,'1');eliminate(g,'3',20,'1');assert.equal(g.players[0].earnedBounty,600);
@@ -208,4 +210,45 @@ test('undoing reentry returns a reopened tournament to its settled result',()=>{
   assert.equal(restored.deadline,null);
   assert.deepEqual(restored.players,snapshot.players);
   assert.deepEqual(restored.events,snapshot.events);
+});
+
+test('one addon per player by default, and undo makes it available again',()=>{
+  const g=game({bountyMode:'fixed'}), before=structuredClone(g);
+  addEntry(g,'1','addon',10);
+  assert.equal(addonsRemaining(g,g.players[0]),0);
+  const after=structuredClone(g);
+  assert.throws(()=>addEntry(g,'1','addon',20),/Лимит/);
+  assert.deepEqual(g,after);
+  const restored=restoreAction(g,before,30);
+  assert.equal(addonsRemaining(restored,restored.players[0]),1);
+  addEntry(restored,'1','addon',40);assertBankBalances(restored);
+});
+test('configured addon limit applies across reentries, while inactive players cannot addon',()=>{
+  const g=game({bountyMode:'fixed',addonLimit:3});
+  for(let i=0;i<3;i++)addEntry(g,'1','addon',i);
+  assert.equal(g.players[0].addons,3);
+  eliminate(g,'1',10,'2');
+  assert.throws(()=>addEntry(g,'1','addon',20));
+  addEntry(g,'1','reentry',30);
+  assert.equal(addonsRemaining(g,g.players[0]),0);
+  assert.throws(()=>addEntry(g,'1','addon',40),/Лимит/);
+  assertBankBalances(g);
+});
+test('legacy games retain historical purchases and money when addon limits are added',()=>{
+  const g=game();delete g.config.addonLimit;
+  Object.assign(g.players[0],{rebuys:2,addons:2,entries:3,invested:4000,mainContribution:4000});
+  g.events.push({type:'rebuy',playerId:'1',amount:1000,at:0});
+  const oldPlayers=structuredClone(g.players),oldEvents=structuredClone(g.events),oldPool=poolOf(g);
+  normalizeGame(g);
+  assert.equal(g.config.addonLimit,1);
+  assert.deepEqual(g.players,oldPlayers);assert.deepEqual(g.events,oldEvents);assert.equal(poolOf(g),oldPool);
+  assert.equal(addonsRemaining(g,g.players[0]),0);
+  const snapshot=structuredClone(g);delete snapshot.config.addonLimit;
+  assert.equal(restoreAction(g,snapshot).config.addonLimit,1);
+});
+test('addon limit must be between one and three',()=>{
+  assert.throws(()=>recommendStructure(defaults(),{addons:7}),/лимит/);
+  assert.equal(recommendStructure({...defaults(),addonLimit:3},{addons:18}).chips,150000);
+  for(const addonLimit of [0,4,1.5,NaN]) assert.notEqual(validateConfig({...defaults(),addonLimit}),'');
+  for(const addonLimit of [1,2,3]) assert.equal(validateConfig({...defaults(),addonLimit}),'');
 });

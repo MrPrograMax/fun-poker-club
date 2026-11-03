@@ -1,8 +1,8 @@
 export const defaults = () => ({
   name: 'Покер с друзьями', mode: 'tournament', stack: 10000, sb: 25, bb: 50,
   duration: 20, buyin: 1000, seats: 6, tableCapacity: 10, prizes: [50, 30, 20],
-  breakEvery: 4, breakDuration: 10, ante: false, rebuy: true,
-  reentry: true, addonCost: 500, addonStack: 5000,
+  breakEvery: 4, breakDuration: 10, ante: false,
+  reentry: true, addonCost: 500, addonStack: 5000, addonLimit: 1,
   bountyMode: 'off', bountyAmount: 200, bountyImmediate: 50,
 });
 
@@ -41,6 +41,7 @@ export function recommendStructure(config, { targetMinutes = 240, extraEntries =
   if (!Number.isInteger(targetMinutes) || targetMinutes < 30 || targetMinutes > 1440) throw new Error('Длительность турнира: от 30 до 1 440 минут');
   if (![extraEntries, addons].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)) throw new Error('Ожидаемые докупки: от 0 до 1 000');
   if (!Number.isInteger(stack) || stack < 1 || stack > 10000000 || !Number.isInteger(seats) || seats < 2 || seats > MAX_PLAYERS) throw new Error('Проверьте стартовый стек и количество игроков в настройках');
+  if (addons > seats * (config.addonLimit ?? 1)) throw new Error('Ожидаемые аддоны превышают лимит на всех игроков');
   if (![sb, bb].every(n => Number.isInteger(n) && n > 0 && n <= 1000000) || sb >= bb) throw new Error('Проверьте стартовые блайнды в настройках');
   if (!Number.isInteger(duration) || duration < 1 || duration > 180 || !Number.isInteger(breakEvery) || breakEvery < 0 || breakEvery > 12 || !Number.isInteger(breakDuration) || breakDuration < 1 || breakDuration > 60) throw new Error('Проверьте длительность уровней и перерывов');
   if (addons && (!Number.isInteger(addonStack) || addonStack < 1 || addonStack > 10000000)) throw new Error('Проверьте количество фишек за аддон');
@@ -113,6 +114,7 @@ export function validateConfig(c) {
     if (c.prizes.some(p => !Number.isFinite(p) || p <= 0) || Math.abs(c.prizes.reduce((a, b) => a + b, 0) - 100) > 0.001) return 'Сумма призовых должна быть равна 100%';
     if (c.prizes.length > c.seats) return 'Призовых мест не может быть больше, чем игроков';
     if (!Number.isInteger(c.addonCost) || c.addonCost < 1 || !Number.isInteger(c.addonStack) || c.addonStack < 1) return 'Стоимость и стек аддона должны быть положительными целыми числами';
+    if (!Number.isInteger(c.addonLimit) || c.addonLimit < 1 || c.addonLimit > 3) return 'Лимит аддонов: от 1 до 3 на игрока за турнир';
     if (!['off','fixed','progressive'].includes(c.bountyMode)) return 'Выберите режим баунти';
     if (c.bountyMode !== 'off' && (!Number.isInteger(c.bountyAmount) || c.bountyAmount < 1 || c.bountyAmount >= c.buyin)) return 'Баунти должно быть меньше первого взноса';
     if (c.bountyMode === 'progressive' && (!Number.isInteger(c.bountyImmediate) || c.bountyImmediate < 1 || c.bountyImmediate > 99)) return 'Сразу выплачивается от 1 до 99% прогрессивного баунти';
@@ -195,7 +197,7 @@ export function restoreAction(game, snapshot, now = Date.now()) {
   // Revert the operation, while keeping the clock and level as the host left them.
   for (const key of ['index', 'remaining', 'elapsed', 'running', 'deadline', 'lastTick', 'structureEnded']) restored[key] = game[key];
   if (restored.finished) { restored.running = false; restored.deadline = null; }
-  return restored;
+  return normalizeGame(restored);
 }
 
 export function eliminate(game, id, now = Date.now(), killerId = null) {
@@ -236,16 +238,20 @@ function recordEvent(game,event,now=Date.now()) {
   game.events.push({...event,at:now});
   if(game.events.length>200)game.events.shift();
 }
+export function addonsRemaining(game, player) {
+  return Math.max(0, (game.config.addonLimit ?? 1) - (player.addons || 0));
+}
+
 export function addEntry(game,id,type,now=Date.now()) {
   const p=game.players.find(p=>p.id===id);
   if(!p || game.config.mode!=='tournament')throw new Error('Игрок не найден');
   if(type==='reentry') {
     if(p.active || !game.config.reentry)throw new Error('Ре-энтри недоступен');
-  } else if(!p.active || game.finished || !['rebuy','addon'].includes(type))throw new Error('Докупка недоступна');
-  if(type==='rebuy'&&!game.config.rebuy)throw new Error('Ребаи выключены');
+  } else if(!p.active || game.finished || type!=='addon')throw new Error('Докупка недоступна');
+  if(type==='addon'&&!addonsRemaining(game,p))throw new Error('Лимит аддонов для игрока исчерпан');
   advanceClock(game,now);
   const amount=type==='addon'?game.config.addonCost:game.config.buyin;
-  // Re-entry restores a head from the contribution; add-ons/rebuys stay in prizes.
+  // Re-entry restores a head from the contribution; add-ons stay in prizes.
   const bounty=type==='reentry'&&game.config.bountyMode!=='off'?game.config.bountyAmount:0;
   p.invested+=amount;
   p.mainContribution+=amount-bounty;
@@ -262,8 +268,7 @@ export function addEntry(game,id,type,now=Date.now()) {
     game.eliminationOrder=game.eliminationOrder.filter(x=>x!==id);
     game.finished=false;
     updatePlaces(game);
-  } else if(type==='addon')p.addons++;
-  else {p.rebuys++;p.entries++;}
+  } else p.addons++;
   recordEvent(game,{type,playerId:id,amount,bounty},now);
 }
 
