@@ -1,0 +1,7 @@
+.git
+.openai
+data
+.local
+river-poker
+node_modules
+.DS_Store
