@@ -1,10 +1,28 @@
 export const defaults = () => ({
   name: 'Покер с друзьями', mode: 'tournament', stack: 10000, sb: 25, bb: 50,
-  duration: 20, buyin: 1000, seats: 6, prizes: [50, 30, 20],
+  duration: 20, buyin: 1000, seats: 6, tableCapacity: 10, prizes: [50, 30, 20],
   breakEvery: 4, breakDuration: 10, ante: false, rebuy: true,
   reentry: true, addonCost: 500, addonStack: 5000,
   bountyMode: 'off', bountyAmount: 200, bountyImmediate: 50,
 });
+
+export const MAX_PLAYERS = 200;
+
+export function seatingPlan(playerCount, tableCapacity = 10) {
+  if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > MAX_PLAYERS ||
+      !Number.isInteger(tableCapacity) || tableCapacity < 2 || tableCapacity > 10) return [];
+  const tables = Math.ceil(playerCount / tableCapacity);
+  const perTable = Math.floor(playerCount / tables);
+  return Array.from({ length: tables }, (_, i) => perTable + (i < playerCount % tables ? 1 : 0));
+}
+
+export function seatPlayers(players, tableCapacity = 10) {
+  let offset = 0;
+  return seatingPlan(players.length, tableCapacity).flatMap((count, tableIndex) =>
+    Array.from({ length: count }, (_, seatIndex) => ({
+      ...players[offset++], table: tableIndex + 1, seat: seatIndex + 1,
+    })));
+}
 
 export function makeLevels(config) {
   const multipliers = [1, 2, 3, 4, 6, 8, 12, 16, 20, 30, 40, 60];
@@ -33,7 +51,8 @@ export function validateConfig(c) {
   if (!Number.isInteger(c.stack) || c.stack < 1 || c.stack > 10000000) return 'Стартовый стек: от 1 до 10 000 000';
   if (![c.sb, c.bb].every(v => Number.isInteger(v) && v > 0 && v <= 1000000) || c.sb >= c.bb) return 'Большой блайнд должен быть больше малого';
   if (!Number.isInteger(c.buyin) || c.buyin < 1 || c.buyin > 10000000) return 'Взнос: от 1 до 10 000 000 ₽';
-  if (!Number.isInteger(c.seats) || c.seats < 2 || c.seats > 10) return 'За одним столом от 2 до 10 игроков';
+  if (!Number.isInteger(c.seats) || c.seats < 2 || c.seats > MAX_PLAYERS) return `Количество игроков: от 2 до ${MAX_PLAYERS}`;
+  if (!Number.isInteger(c.tableCapacity) || c.tableCapacity < 2 || c.tableCapacity > 10) return 'Вместимость одного стола: от 2 до 10 игроков';
   if (c.mode === 'tournament') {
     if (!Number.isInteger(c.duration) || c.duration < 1 || c.duration > 180) return 'Укажите длительность уровня от 1 до 180 минут';
     if (c.prizes.some(p => !Number.isFinite(p) || p <= 0) || Math.abs(c.prizes.reduce((a, b) => a + b, 0) - 100) > 0.001) return 'Сумма призовых должна быть равна 100%';
@@ -51,6 +70,9 @@ export function poolOf(game) { return game.players.reduce((sum, p) => sum + (gam
 export function bountyPoolOf(game) { return game.players.reduce((sum,p)=>sum+(p.bountyPaid||0),0); }
 export function normalizeGame(game) {
   game.config = { ...defaults(), ...game.config };
+  if (game.players.some(p => !Number.isInteger(p.table) || p.table < 1)) {
+    game.players = seatPlayers(game.players, game.config.tableCapacity);
+  }
   game.eliminationOrder ||= game.players.filter(p=>p.place>1).sort((a,b)=>b.place-a.place).map(p=>p.id);
   game.events ||= [];
   for (const p of game.players) {
@@ -64,7 +86,7 @@ export function createGame(config, levels, players, now = Date.now()) {
   const bounty = config.mode === 'tournament' && config.bountyMode !== 'off' ? config.bountyAmount : 0;
   return {
     config: structuredClone(config), levels: structuredClone(levels),
-    players: players.map((p, i) => ({ ...p, seat: i + 1, active: true, invested: config.buyin, mainContribution: config.buyin-bounty, bountyPaid: bounty, bounty, earnedBounty: 0, knockouts: 0, rebuys: 0, reentries: 0, addons: 0, entries: 1, cashout: null, place: null })),
+    players: seatPlayers(players, config.tableCapacity).map(p => ({ ...p, active: true, invested: config.buyin, mainContribution: config.buyin-bounty, bountyPaid: bounty, bounty, earnedBounty: 0, knockouts: 0, rebuys: 0, reentries: 0, addons: 0, entries: 1, cashout: null, place: null })),
     index: 0, remaining: levels[0].duration, elapsed: 0, running: false,
     deadline: null, lastTick: now, finished: false, structureEnded: false,
     eliminationOrder: [], events: [], winnerBounty: null,

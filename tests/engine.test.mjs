@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, makeLevels, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
@@ -75,4 +75,53 @@ test('odd bounty amounts remain conserved with configurable PKO split',()=>{
 });
 test('bounty needs a distinct live killer and re-entry only allows eliminated players',()=>{
   const g=game({bountyMode:'fixed'});assert.throws(()=>eliminate(g,'2',10,'2'));assert.throws(()=>eliminate(g,'2',10,null));assert.throws(()=>addEntry(g,'2','reentry'));assertBankBalances(g);
+});
+
+test('large groups are balanced across tables without exceeding capacity',()=>{
+  assert.deepEqual(seatingPlan(12,10),[6,6]);
+  assert.deepEqual(seatingPlan(15,10),[8,7]);
+  assert.deepEqual(seatingPlan(25,8),[7,6,6,6]);
+  for(let count=2;count<=200;count++) {
+    for(let capacity=2;capacity<=10;capacity++) {
+      const plan=seatingPlan(count,capacity);
+      assert.equal(plan.reduce((a,b)=>a+b,0),count);
+      assert.ok(Math.max(...plan)<=capacity);
+      assert.ok(Math.max(...plan)-Math.min(...plan)<=1);
+    }
+  }
+});
+test('each player gets exactly one table and seat, preserving the shuffled input order',()=>{
+  const people=Array.from({length:15},(_,i)=>({id:String(15-i),name:`Player ${i}`}));
+  const seated=seatPlayers(people,10);
+  assert.deepEqual(seated.map(p=>p.id),people.map(p=>p.id));
+  assert.equal(new Set(seated.map(p=>`${p.table}/${p.seat}`)).size,15);
+  assert.deepEqual(seated[8],{...people[8],table:2,seat:1});
+  assert.equal(people[0].table,undefined);
+});
+test('multiple tables share prizes and preserve seating across knockouts and re-entries',()=>{
+  const c={...defaults(),seats:15,bountyMode:'progressive'};
+  const people=Array.from({length:15},(_,i)=>({id:String(i),name:`Player ${i}`}));
+  const g=createGame(c,makeLevels(c),people,0);
+  assert.equal(poolOf(g),12000);assert.equal(bountyPoolOf(g),3000);
+  assert.equal(new Set(g.players.map(p=>p.table)).size,2);
+  const positions=g.players.map(p=>[p.table,p.seat]);
+  eliminate(g,'9',10,'8');addEntry(g,'9','reentry',20);
+  assert.deepEqual(g.players.map(p=>[p.table,p.seat]),positions);
+  assertBankBalances(g);
+});
+test('old saved games gain table numbers without changing financial results or clock',()=>{
+  const g=game();delete g.config.tableCapacity;
+  g.players.forEach(p=>delete p.table);
+  const before={pool:poolOf(g),remaining:g.remaining,players:g.players.map(p=>p.id)};
+  normalizeGame(g);
+  assert.deepEqual(g.players.map(p=>p.table),[1,1,1]);
+  assert.deepEqual({pool:poolOf(g),remaining:g.remaining,players:g.players.map(p=>p.id)},before);
+});
+test('rejects out-of-range groups without trying to allocate seats',()=>{
+  for(const seats of [-1,0,1,201,Infinity,NaN,2.5]) {
+    assert.notEqual(validateConfig({...defaults(),seats}),'');
+    assert.deepEqual(seatingPlan(seats),[]);
+  }
+  assert.equal(validateConfig({...defaults(),seats:200}),'');
+  assert.notEqual(validateConfig({...defaults(),tableCapacity:11}),'');
 });
