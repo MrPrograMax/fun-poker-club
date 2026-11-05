@@ -285,7 +285,7 @@ function showRegistration() {
   const suggested=tables.filter(t=>t.seats.length&&!t.isNew).sort((a,b)=>b.seats.length-a.seats.length||a.table-b.table)[0]||tables.at(-1);
   const bounty=cash||c.bountyMode==='off'?0:c.bountyAmount;
   const candidates=state.library.filter(p=>!g.players.some(x=>x.id===p.id||playerNameKey(x.name)===playerNameKey(p.name)));
-  modal('Добавить игрока', `<p>${cash?'Новый участник кэш-игры.':'Поздняя регистрация · первый вход в турнир.'}</p><div class="name-field spaced">${input('Имя и фамилия','lateName','','','id="late-name" autocomplete="off" maxlength="60" required')}<div id="late-suggestions" class="registration-suggestions" hidden></div></div><div class="spaced">${input('Ник · необязательно','lateNick','','','maxlength="24" autocomplete="off"')}</div><div class="fields two spaced"><label class="field"><span>Стол</span><select name="registrationTable">${tables.map(t=>`<option value="${t.table}" ${t.table===suggested.table?'selected':''} ${!t.seats.length?'disabled':''}>${t.isNew?'Новый стол':'Стол'} ${t.table}${!t.seats.length?' · занят':''}</option>`).join('')}</select></label><label class="field"><span>Место</span><select name="registrationSeat"></select></label></div><p class="field-hint">Места зарегистрированных игроков сохраняются для ре-энтри. Можно выбрать свободное место или открыть новый стол.</p><div class="registration-terms"><div><span>Первый взнос</span><strong>${money(c.buyin)}</strong></div><div><span>Стартовый стек</span><strong>${number(c.stack)}</strong></div>${bounty?`<div><span>За голову</span><strong>${money(bounty)}</strong></div>`:''}</div><p class="field-hint">${cash?'В банк игры': 'В призовой фонд'} поступит ${money(c.buyin-bounty)}.${g.freezeout?' Фризаут уже начат — вход по вашей договорённости.':''}</p><p id="registration-error" class="field-hint error" role="alert" hidden></p>`, 'Добавить игрока', data=>{
+  modal('Добавить игрока', `<p>${cash?'Новый участник кэш-игры.':'Поздняя регистрация · первый вход в турнир.'}</p><div class="name-field spaced">${input('Имя и фамилия','lateName','','','id="late-name" autocomplete="off" maxlength="60" required')}<div id="late-suggestions" class="registration-suggestions" hidden></div></div><div class="spaced">${input('Ник · необязательно','lateNick','','','maxlength="24" autocomplete="off"')}</div><div class="registration-placement spaced"><div class="registration-placement-heading"><span id="registration-placement-status" class="placement-status automatic" role="status"><span aria-hidden="true">✓</span> <span id="placement-mode-label">Выбрано автоматически</span></span><button type="button" id="reset-placement" class="text-button" hidden>Подобрать автоматически</button></div><div class="fields two"><label class="field"><span>Стол</span><select name="registrationTable" aria-describedby="registration-placement-status">${tables.map(t=>`<option value="${t.table}" ${t.table===suggested.table?'selected':''} ${!t.seats.length?'disabled':''}>${t.isNew?'Новый стол':'Стол'} ${t.table}${!t.seats.length?' · занят':''}</option>`).join('')}</select></label><label class="field"><span>Место</span><select name="registrationSeat" aria-describedby="registration-placement-status"></select></label></div></div><p class="field-hint">Места зарегистрированных игроков сохраняются для ре-энтри. Можно выбрать свободное место или открыть новый стол.</p><div class="registration-terms"><div><span>Первый взнос</span><strong>${money(c.buyin)}</strong></div><div><span>Стартовый стек</span><strong>${number(c.stack)}</strong></div>${bounty?`<div><span>За голову</span><strong>${money(bounty)}</strong></div>`:''}</div><p class="field-hint">${cash?'В банк игры': 'В призовой фонд'} поступит ${money(c.buyin-bounty)}.${g.freezeout?' Фризаут уже начат — вход по вашей договорённости.':''}</p><p id="registration-error" class="field-hint error" role="alert" hidden></p>`, 'Добавить игрока', data=>{
     const name=String(data.get('lateName')).trim();
     const known=state.library.find(p=>playerNameKey(p.name)===playerNameKey(name));
     const profile={id:known?.id||uid(),name,nick:String(data.get('lateNick')).trim()};
@@ -315,7 +315,17 @@ function showRegistration() {
     $('#registration-error').hidden=true;
     if(event.target===nameInput) showSuggestions();
   });
-  form.elements.registrationTable.addEventListener('change',updateSeats);
+  const setPlacementMode=automatic=>{
+    $('#placement-mode-label').textContent=automatic?'Выбрано автоматически':'Выбрано вручную';
+    $('#registration-placement-status').classList.toggle('automatic',automatic);
+    $('#reset-placement').hidden=automatic;
+  };
+  form.elements.registrationTable.addEventListener('change',()=>{updateSeats();setPlacementMode(false);});
+  form.elements.registrationSeat.addEventListener('change',()=>setPlacementMode(false));
+  $('#reset-placement').addEventListener('click',()=>{
+    form.elements.registrationTable.value=String(suggested.table);
+    updateSeats();setPlacementMode(true);
+  });
   suggestions.addEventListener('click',event=>{
     const button=event.target.closest('[data-registration-suggestion]');
     const player=candidates.find(p=>p.id===button?.dataset.registrationSuggestion);

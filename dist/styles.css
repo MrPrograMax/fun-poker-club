@@ -313,3 +313,7 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 .registration-suggestions button:hover{background:#2b3923}
 .registration-suggestions small{color:var(--muted)}
 @media(max-width:620px){.roster-panel .section-heading{flex-wrap:wrap}.roster-tools{justify-content:flex-start}.registration-modal .spaced{margin-top:18px}}
+.registration-placement-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 12px;margin-bottom:12px}
+.placement-status{display:inline-flex;align-items:center;gap:6px;color:#aab2a3;font-size:10px;line-height:1.5;padding:5px 9px;border:1px solid #404b37;border-radius:6px;background:#20271d}
+.placement-status.automatic{color:#c5e6a1;border-color:#52683e;background:#26351e}
+.registration-placement-heading .text-button{padding:5px 0;font-size:10px;text-align:left}
