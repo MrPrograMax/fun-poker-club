@@ -1,4 +1,4 @@
-# RIVER · Fun Poker Club
+# Until Morning · Poker with friends
 
 Веб-сервис для домашних покерных вечеров: настройки, рассадка и крупное тёмное табло. Сервер на **Go**, интерфейс на HTML/CSS/JavaScript без сборщика и npm-зависимостей.
 
