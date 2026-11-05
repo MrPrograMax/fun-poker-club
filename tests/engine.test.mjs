@@ -301,3 +301,53 @@ test('undoing a financial operation after freezeout keeps its phase and clock',(
   assert.deepEqual(restored.freezeout,before.freezeout);assert.equal(restored.running,true);
   assert.equal(restored.elapsed,2000);assert.equal(restored.remaining,1198);assert.equal(poolOf(restored),3000);
 });
+
+test('automatic opening blinds repair invalid manual blinds and scale with stack and depth',()=>{
+  const c={...defaults(),stack:1000,sb:10,bb:10};
+  const plan=recommendStructure(c,{autoBlinds:true,startDepth:100});
+  assert.equal(plan.startSB,5);assert.equal(plan.startBB,10);assert.equal(plan.startDepth,100);
+  assert.equal(plan.levels[0].sb,5);assert.equal(plan.levels[0].bb,10);
+  assert.equal(plan.levels.reduce((sum,l)=>sum+l.duration,0),240*60);
+  assert.equal(recommendStructure({...c,stack:10000},{autoBlinds:true}).startBB,100);
+  assert.equal(recommendStructure({...c,stack:10000},{autoBlinds:true,startDepth:200}).startBB,50);
+  assert.equal(c.sb,10);assert.equal(c.bb,10);
+  assert.throws(()=>recommendStructure(c,{autoBlinds:false}));
+});
+test('automatic openings use integer chips and valid blind ratios over the supported range',()=>{
+  for(const stack of [1,99,750,1000,15000,10000000]) for(const startDepth of [20,100,200,500]) {
+    const plan=recommendStructure({...defaults(),stack},{autoBlinds:true,startDepth});
+    assert.ok(plan.levels.filter(l=>l.kind==='level').every(l=>Number.isInteger(l.sb)&&l.sb>=1&&l.bb===2*l.sb));
+    assert.ok(plan.startBB<=1000000);
+  }
+  for(const startDepth of [0,19,501,100.5,NaN]) assert.throws(()=>recommendStructure(defaults(),{autoBlinds:true,startDepth}));
+});
+test('elimination without bounty records no killer and can be undone after declaring a winner',()=>{
+  const g=game();eliminate(g,'2',10,'1');
+  assert.equal(g.events.at(-1).killerId,null);assert.equal(g.players[0].knockouts,0);
+  const before=structuredClone(g);eliminate(g,'3',20);
+  assert.equal(g.finished,true);assert.equal(g.players[0].place,1);
+  const restored=restoreAction(g,before,30);
+  assert.equal(restored.finished,false);assert.equal(restored.players[2].active,true);
+  assert.equal(restored.players[0].place,null);assert.equal(poolOf(restored),3000);
+});
+test('freezeout addon terms affect only future purchases and preserve their recorded chip counts',()=>{
+  const g=game({bountyMode:'fixed'});addEntry(g,'1','addon',0);
+  const paid=structuredClone(g.players), before=structuredClone(g), oldPurchase=structuredClone(g.events[0]);
+  assert.equal(startFreezeout(g,1000,{addonCost:1500,addonStack:20000}),true);
+  assert.deepEqual(g.players,paid);assert.equal(poolOf(g),2900);
+  assert.deepEqual(g.events[0],oldPurchase);assert.equal(oldPurchase.amount,500);assert.equal(oldPurchase.chips,5000);
+  assert.equal(g.events.at(-1).addonCost,1500);assert.equal(g.events.at(-1).addonStack,20000);
+  const restored=restoreAction(g,before,2000);
+  assert.equal(restored.config.addonCost,500);assert.equal(restored.config.addonStack,5000);assert.equal(restored.freezeout,null);
+  const reloaded=normalizeGame(JSON.parse(JSON.stringify(g)));
+  addEntry(reloaded,'1','addon',2000);
+  assert.equal(poolOf(reloaded),4400);assert.equal(reloaded.players[0].addons,2);
+  assert.equal(reloaded.events.at(-1).amount,1500);assert.equal(reloaded.events.at(-1).chips,20000);
+  assert.equal(reloaded.config.reentry,true);assertBankBalances(reloaded);
+});
+test('invalid freezeout addon terms leave game and running timer untouched',()=>{
+  for(const terms of [{addonCost:0},{addonStack:-1},{addonCost:1.5},{addonStack:10000001},{addonCost:NaN}]) {
+    const g=game();toggleClock(g,0);const before=structuredClone(g);
+    assert.throws(()=>startFreezeout(g,1000,terms));assert.deepEqual(g,before);
+  }
+});

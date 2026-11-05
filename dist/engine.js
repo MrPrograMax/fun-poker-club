@@ -36,7 +36,22 @@ export function makeLevels(config) {
   return levels;
 }
 
-export function recommendStructure(config, { targetMinutes = 240, extraEntries = 0, addons = 0 } = {}) {
+export function recommendOpeningBlinds(stack, startDepth = 100) {
+  if (!Number.isInteger(stack) || stack < 1 || stack > 10000000) throw new Error('Стартовый стек: от 1 до 10 000 000');
+  if (!Number.isInteger(startDepth) || startDepth < 20 || startDepth > 500) throw new Error('Глубина стартового стека: от 20 до 500 ББ');
+  const target = stack / startDepth / 2;
+  let sb = 1;
+  for (let magnitude = 1; magnitude <= 100000; magnitude *= 10) {
+    for (const factor of [1, 2, 2.5, 5]) {
+      const candidate = factor * magnitude;
+      if (Number.isInteger(candidate) && Math.abs(Math.log(candidate / target)) < Math.abs(Math.log(sb / target))) sb = candidate;
+    }
+  }
+  return { sb, bb: sb * 2 };
+}
+
+export function recommendStructure(config, { targetMinutes = 240, extraEntries = 0, addons = 0, autoBlinds = false, startDepth = 100 } = {}) {
+  if (autoBlinds) config = { ...config, ...recommendOpeningBlinds(config.stack, startDepth) };
   const { stack, seats, sb, bb, duration, breakEvery, breakDuration, addonStack } = config;
   if (!Number.isInteger(targetMinutes) || targetMinutes < 30 || targetMinutes > 1440) throw new Error('Длительность турнира: от 30 до 1 440 минут');
   if (![extraEntries, addons].every(n => Number.isInteger(n) && n >= 0 && n <= 1000)) throw new Error('Ожидаемые докупки: от 0 до 1 000');
@@ -88,7 +103,7 @@ export function recommendStructure(config, { targetMinutes = 240, extraEntries =
     levels.push({ kind: 'level', number: i + 1, sb: i ? big / 2 : sb, bb: big, ante: config.ante ? big : 0, duration: minutes * 60 });
   });
   return { levels, chips, targetMinutes, playingMinutes: best.playingMinutes, breakMinutes: best.breaks * breakDuration,
-    startDepth: stack / bb, finalBB: selected.at(-1), maxIncrease: Math.max(...selected.slice(1).map((value, i) => value / selected[i])) };
+    startSB: sb, startBB: bb, startDepth: stack / bb, finalBB: selected.at(-1), maxIncrease: Math.max(...selected.slice(1).map((value, i) => value / selected[i])) };
 }
 
 // Largest-remainder allocation keeps the total exact, even for odd prize pools.
@@ -205,8 +220,9 @@ export function restoreAction(game, snapshot, now = Date.now()) {
   return normalizeGame(restored);
 }
 
-export function startFreezeout(game, now = Date.now()) {
+export function startFreezeout(game, now = Date.now(), { addonCost = game.config.addonCost, addonStack = game.config.addonStack } = {}) {
   if (game.config.mode !== 'tournament' || game.finished || game.structureEnded || game.freezeout) return false;
+  if (![addonCost, addonStack].every(value => Number.isInteger(value) && value >= 1 && value <= 10000000)) throw new Error('Стоимость и фишки аддона: целые числа от 1 до 10 000 000');
   advanceClock(game, now);
   if (game.structureEnded) return false;
   let index = game.index;
@@ -217,15 +233,17 @@ export function startFreezeout(game, now = Date.now()) {
   game.running = true;
   game.lastTick = now;
   game.deadline = now + game.remaining * 1000;
+  game.config.addonCost = addonCost;
+  game.config.addonStack = addonStack;
   game.freezeout = { startedAt: now, level: game.levels[index].number };
-  recordEvent(game, { type: 'freezeout', level: game.levels[index].number }, now);
+  recordEvent(game, { type: 'freezeout', level: game.levels[index].number, addonCost, addonStack }, now);
   return true;
 }
 
 export function eliminate(game, id, now = Date.now(), killerId = null) {
   const player = game.players.find(p => p.id === id);
   if (!player?.active || game.finished) return;
-  const killer = game.players.find(p=>p.id===killerId && p.active && p.id!==id);
+  const killer = game.config.bountyMode === 'off' ? null : game.players.find(p=>p.id===killerId && p.active && p.id!==id);
   if (game.config.bountyMode !== 'off' && !killer) throw new Error('Выберите игрока, который выбил участника');
   advanceClock(game, now);
   if (killer) {
@@ -286,7 +304,7 @@ export function addEntry(game,id,type,now=Date.now()) {
     game.finished=false;
     updatePlaces(game);
   } else p.addons++;
-  recordEvent(game,{type,playerId:id,amount,bounty},now);
+  recordEvent(game,{type,playerId:id,amount,bounty,chips:type==='addon'?game.config.addonStack:game.config.stack},now);
 }
 
 export function formatTime(seconds, hours = false) {

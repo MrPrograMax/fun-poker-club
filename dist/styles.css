@@ -134,6 +134,14 @@
 .plan-summary{display:grid;gap:7px;margin-top:16px;font-size:11px;line-height:1.7;color:#a8bb99}
 .plan-summary strong{font-size:13px;color:#d7e8c8;font-weight:500}
 .plan-summary .plan-warning{color:#e6c291}
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23b5c3a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:16px 16px;padding-right:42px}
+.prize-heading select{padding-right:32px;background-position:right 10px center}
+.planner-blinds{margin:18px 0;padding:16px;border:1px solid #3d4b35;border-radius:10px;background:#152017}
+.planner-blinds .toggle-row{gap:14px}
+.planner-depth{display:grid;grid-template-columns:minmax(140px,1fr) 1fr;align-items:center;gap:16px;margin-top:16px}
+.planner-depth .field-hint{margin:0}
+.planner-depth input:disabled{opacity:.45}
+@media(max-width:620px){.planner-depth{grid-template-columns:1fr;gap:8px}.planner-blinds{padding:12px}}
 .structure-modal .level-editor{max-height:35vh}
 .structure-modal .modal-actions{position:sticky;bottom:-28px;padding:18px 0;background:#1a2117;margin-top:10px}
 .roster{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));align-items:start;gap:14px}
