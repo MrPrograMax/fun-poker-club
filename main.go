@@ -200,7 +200,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(ctx)
 	}()
-	log.Printf("RIVER: http://%s", strings.TrimPrefix(address, "http://"))
+	log.Printf("Until Morning: http://%s", strings.TrimPrefix(address, "http://"))
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

@@ -1,0 +1,95 @@
+name: Build and release
+
+on:
+  push:
+    branches: [release-main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check application
+        run: |
+          go test -race ./...
+          go vet ./...
+          node --test tests/*.test.mjs
+          node --check dist/app.js
+          sh -n start.sh start.command
+      - name: Select archive version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            echo "value=$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=v0.0.0-dev.${COMMIT_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build all platforms
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/build-release.py "$RELEASE_VERSION"
+      - name: Smoke-test the Linux archive
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/smoke-release.py "build/releases/$RELEASE_VERSION/until-morning-$RELEASE_VERSION-linux-amd64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: until-morning
+          path: |
+            build/releases/**/*.zip
+            build/releases/**/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: until-morning
+          path: release-files
+      - name: Publish release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## Быстрый запуск
+          Скачайте архив для своей системы из **Assets**, распакуйте его и запустите:
+          - Windows: `start.cmd`
+          - macOS: `start.command`
+          - Linux: `./start.sh`
+
+          Откройте http://localhost:8080. Go, Docker и Node.js устанавливать не нужно.
+          Оставьте окно запуска открытым на время игры. Остановка — Ctrl+C.
+
+          Для Mac с Apple Silicon (M1/M2/M3/M4 и новее) выбирайте `macos-arm64`, для Intel — `macos-amd64`.
+          Для обычного Windows/Linux на Intel/AMD выбирайте `amd64`, для ARM — `arm64`.
+          **Source code (zip/tar.gz)** содержит исходники, а готовое приложение — архив `until-morning-…`.
+
+          Игра сохраняется в папке `data` рядом с запускатором. Перенесите её при обновлении.
+          Сборки пока без цифровой подписи: при первом запуске macOS или Windows могут запросить разрешение на открытие.
+          NOTES
+          mapfile -d '' assets < <(find release-files -type f \( -name '*.zip' -o -name SHA256SUMS.txt \) -print0)
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Until Morning $RELEASE_TAG" --notes-file release-notes.md
