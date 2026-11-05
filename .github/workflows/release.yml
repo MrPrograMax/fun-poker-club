@@ -81,7 +81,8 @@ jobs:
           - macOS: `start.command`
           - Linux: `./start.sh`
 
-          Откройте http://localhost:8080. Go, Docker и Node.js устанавливать не нужно.
+          Браузер откроется автоматически. Если окно не открылось, перейдите на http://localhost:8080 вручную.
+          Go, Docker и Node.js устанавливать не нужно.
           Оставьте окно запуска открытым на время игры. Остановка — Ctrl+C.
 
           Для Mac с Apple Silicon (M1/M2/M3/M4 и новее) выбирайте `macos-arm64`, для Intel — `macos-amd64`.

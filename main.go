@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"io/fs"
 	"log"
@@ -14,10 +15,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
-	"time"
 )
 
 //go:embed dist/*
@@ -179,6 +178,8 @@ func handler(s *store) http.Handler {
 }
 
 func main() {
+	autoOpen := flag.Bool("open-browser", false, "Open the app in the default browser after startup")
+	flag.Parse()
 	address := os.Getenv("LISTEN_ADDR")
 	if address == "" {
 		address = "127.0.0.1:8080"
@@ -191,17 +192,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("open storage: %v", err)
 	}
-	server := &http.Server{Addr: address, Handler: handler(s), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	go func() {
-		<-stop.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = server.Shutdown(ctx)
-	}()
-	log.Printf("Until Morning: http://%s", strings.TrimPrefix(address, "http://"))
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	var opener func(string) error
+	if *autoOpen {
+		opener = openBrowser
+	}
+	if err := runServer(stop, address, handler(s), opener); err != nil {
 		log.Fatal(err)
 	}
 }

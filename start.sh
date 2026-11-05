@@ -23,6 +23,6 @@ else
   exit 1
 fi
 
-printf '%s\n' 'Until Morning — open the address printed below in your browser.' \
+printf '%s\n' 'Until Morning — your browser will open automatically.' \
   'Keep this window open while playing. Press Ctrl+C to stop.'
-exec "$APP_BINARY"
+exec "$APP_BINARY" -open-browser "$@"

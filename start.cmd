@@ -18,9 +18,9 @@ goto run
 set "APP_BINARY=until-morning.exe"
 
 :run
-echo Until Morning - open the address printed below in your browser.
+echo Until Morning - your browser will open automatically.
 echo Keep this window open while playing. Press Ctrl+C to stop.
-"%APP_BINARY%"
+"%APP_BINARY%" -open-browser %*
 set "APP_STATUS=%ERRORLEVEL%"
 if not "%APP_STATUS%"=="0" goto failed
 popd
