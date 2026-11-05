@@ -154,15 +154,58 @@ export function normalizeGame(game) {
   return game;
 }
 
-export function createGame(config, levels, players, now = Date.now()) {
+function firstEntry(config, player) {
   const bounty = config.mode === 'tournament' && config.bountyMode !== 'off' ? config.bountyAmount : 0;
+  return { ...player, active: true, invested: config.buyin, mainContribution: config.buyin-bounty, bountyPaid: bounty, bounty, earnedBounty: 0, knockouts: 0, rebuys: 0, reentries: 0, addons: 0, entries: 1, cashout: null, place: null };
+}
+
+export function createGame(config, levels, players, now = Date.now()) {
   return {
     config: structuredClone(config), levels: structuredClone(levels),
-    players: seatPlayers(players, config.tableCapacity).map(p => ({ ...p, active: true, invested: config.buyin, mainContribution: config.buyin-bounty, bountyPaid: bounty, bounty, earnedBounty: 0, knockouts: 0, rebuys: 0, reentries: 0, addons: 0, entries: 1, cashout: null, place: null })),
+    players: seatPlayers(players, config.tableCapacity).map(p => firstEntry(config, p)),
     index: 0, remaining: levels[0].duration, elapsed: 0, running: false,
     deadline: null, lastTick: now, finished: false, structureEnded: false,
     eliminationOrder: [], events: [], winnerBounty: null, freezeout: null,
   };
+}
+
+export const playerNameKey = name => String(name ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
+
+export function registrationTables(game) {
+  const capacity = game.config.tableCapacity;
+  const numbers = [...new Set(game.players.map(p => p.table))].sort((a,b) => a-b);
+  const next = Math.max(0, ...numbers) + 1;
+  return [...numbers, next].map(table => ({
+    table, isNew: table === next,
+    // Keep eliminated players' seats reserved for their possible re-entry.
+    seats: Array.from({length:capacity}, (_,i) => i+1).filter(seat => !game.players.some(p => p.table === table && p.seat === seat)),
+  }));
+}
+
+export function registerPlayer(game, profile, placement = null, now = Date.now()) {
+  if (game.finished) throw new Error('Игра уже завершена');
+  if (game.players.length >= MAX_PLAYERS) throw new Error(`В игре уже ${MAX_PLAYERS} игроков`);
+  const name = String(profile?.name ?? '').trim().replace(/\s+/g, ' ');
+  const nick = String(profile?.nick ?? '').trim();
+  if (!name || name.length > 60) throw new Error('Укажите имя игрока: от 1 до 60 символов');
+  if (nick.length > 24) throw new Error('Ник: не больше 24 символов');
+  if (typeof profile?.id !== 'string' || !profile.id.trim()) throw new Error('Не указан идентификатор игрока');
+  if (game.players.some(p => p.id === profile.id || playerNameKey(p.name) === playerNameKey(name))) {
+    throw new Error(game.config.mode === 'cash' ? 'Этот игрок уже зарегистрирован. Добавьте вход в его карточке.' : 'Этот игрок уже зарегистрирован. Для возвращения используйте ре-энтри в его карточке.');
+  }
+  const tables = registrationTables(game);
+  const suggested = tables.filter(t => t.seats.length && !t.isNew).sort((a,b) => b.seats.length-a.seats.length || a.table-b.table)[0] || tables.at(-1);
+  const { table, seat } = placement ?? { table:suggested.table, seat:suggested.seats[0] };
+  if (!Number.isInteger(table) || !Number.isInteger(seat) || !tables.some(t => t.table === table && t.seats.includes(seat))) {
+    throw new Error('Выберите свободное место за столом');
+  }
+  advanceClock(game, now);
+  const player = firstEntry(game.config, { id:profile.id, name, nick, table, seat });
+  game.players.push(player);
+  game.config.seats = game.players.length;
+  if (game.config.mode === 'tournament') updatePlaces(game);
+  recordEvent(game, { type:'registration', playerId:player.id, amount:player.invested, bounty:player.bountyPaid, chips:game.config.stack, table, seat }, now);
+  return player;
 }
 
 // Use wall-clock deadlines so throttled tabs and page reloads do not stretch levels.

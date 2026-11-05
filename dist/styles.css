@@ -297,3 +297,19 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 @media(max-width:760px){.board-title{flex:1 1 100%}}
 
 .page-heading .eyebrow+p{margin-top:12px}
+
+.roster-tools{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:12px;letter-spacing:normal}
+.register-player-button{color:var(--accent);border-color:#536a40;background:#263321}
+.registration-modal{max-height:calc(100dvh - 32px);overflow:auto}
+.registration-modal .modal-heading{margin-bottom:14px}
+.registration-modal .spaced{margin-top:16px}
+.registration-modal .modal-actions{margin-top:20px}
+.registration-terms{display:flex;flex-wrap:wrap;gap:20px;padding:14px;margin-top:16px;border:1px solid #3b4932;border-radius:10px;background:#121b10}
+.registration-terms>div{flex:1;min-width:90px}
+.registration-terms span{display:block;font-size:10px;color:var(--muted);margin-bottom:8px}
+.registration-terms strong{font-size:18px;font-weight:600}
+.registration-suggestions:not([hidden]){display:grid;gap:4px;padding:6px;margin-top:6px;background:#111a10;border:1px solid #435338;border-radius:8px}
+.registration-suggestions button{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:10px;border:0;border-radius:5px;background:transparent;font-size:12px;overflow-wrap:anywhere}
+.registration-suggestions button:hover{background:#2b3923}
+.registration-suggestions small{color:var(--muted)}
+@media(max-width:620px){.roster-panel .section-heading{flex-wrap:wrap}.roster-tools{justify-content:flex-start}.registration-modal .spaced{margin-top:18px}}
