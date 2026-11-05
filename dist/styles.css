@@ -295,3 +295,5 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
   .table-felt .table-brand{font-size:20px;letter-spacing:3px}
 }
 @media(max-width:760px){.board-title{flex:1 1 100%}}
+
+.page-heading .eyebrow+p{margin-top:12px}
