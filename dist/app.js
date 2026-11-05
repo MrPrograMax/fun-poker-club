@@ -89,11 +89,11 @@ function setupError() {
   return '';
 }
 function structureLabel() {
-  try { return `${levels().filter(l=>l.kind==='level').length} уровней · ${state.autoStructure?'автоподбор':'настроить'}`; }
+  try { return `${levels().filter(l=>l.kind==='level').length} уровней · ${state.autoStructure?'автоподбор':'посмотреть'}`; }
   catch { return 'Проверьте параметры'; }
 }
 function structureHint() {
-  if (!state.autoStructure) return 'Задайте желаемое время турнира — подберём структуру, которую можно поправить вручную.';
+  if (!state.autoStructure) return 'Рассчитайте структуру под длительность вечера или отредактируйте уровни вручную.';
   try { const plan=recommendStructure(state.config,state.autoStructure);return `Автоподбор на ${plan.targetMinutes} мин с перерывами. ${state.autoStructure.autoBlinds?'Стартовые МБ / ББ подбираются от стека. Ручной ввод блайндов отключает их автоподбор.':'Стартовые блайнды заданы вручную.'}`; }
   catch (error) { return error.message; }
 }
@@ -119,7 +119,7 @@ function settingsView() {
   ${state.game ? '<div class="notice">Игра уже создана. Её настройки зафиксированы; для изменения структуры начните новую игру.</div>' : ''}
   <form id="settings-form"><fieldset ${state.game ? 'disabled' : ''}><div class="setup-grid"><div class="setup-main">
     ${section('Формат игры', '01 / ОСНОВНОЕ', `<div class="mode-picker"><button type="button" data-action="mode" data-mode="tournament" class="mode-card ${c.mode === 'tournament' ? 'active' : ''}"><span class="mode-icon">${icon('trophy')}</span><span><strong>Турнир</strong><small>Растущие блайнды и призовые места</small></span><i class="radio"></i></button><button type="button" data-action="mode" data-mode="cash" class="mode-card ${c.mode === 'cash' ? 'active' : ''}"><span class="mode-icon cash-icon">♣</span><span><strong>Кэш-игра</strong><small>Постоянные блайнды, свободный выход</small></span><i class="radio"></i></button></div>${input('Название вечера', 'name', c.name, '', 'type="text" maxlength="60" required placeholder="Например, пятничный покер"')}`)}
-    ${section('Стек и блайнды', '02 / СТРУКТУРА', `<div class="fields three">${numeric('Стартовый стек', 'stack', c.stack, 'фишек')}${numeric('Малый блайнд', 'sb', c.sb, 'SB', 1, 1000000)}${numeric('Большой блайнд', 'bb', c.bb, 'BB', 2, 1000000)}</div>${c.mode === 'tournament' ? `<div class="fields two spaced">${numeric('Длительность уровня', 'duration', c.duration, 'мин', 1, 180)}<label class="field"><span>Структура турнира</span><button type="button" class="input-button" data-action="structure"><span id="structure-label">${structureLabel()}</span> ${icon('arrow')}</button></label></div><p class="field-hint" id="structure-hint">${escape(structureHint())}</p><div class="divider"></div>${toggle('Big blind ante', 'Анте оплачивает только большой блайнд', 'ante', c.ante)}<div class="fields two spaced"><label class="field"><span>Перерыв</span><select name="breakEvery">${[0, 3, 4, 6].map(v => `<option value="${v}" ${c.breakEvery === v ? 'selected' : ''}>${v ? `Каждые ${v} уровня` : 'Без перерывов'}</option>`).join('')}</select></label>${numeric('Длительность перерыва', 'breakDuration', c.breakDuration, 'мин', 1, 60)}</div>` : '<p class="field-hint">Блайнды фиксируются на всю сессию. Таймер показывает время игры.</p>'}`)}
+    ${section('Стек и блайнды', '02 / СТРУКТУРА', `<div class="fields three">${numeric('Стартовый стек', 'stack', c.stack, 'фишек')}${numeric('Малый блайнд', 'sb', c.sb, 'SB', 1, 1000000)}${numeric('Большой блайнд', 'bb', c.bb, 'BB', 2, 1000000)}</div>${c.mode === 'tournament' ? `<div class="structure-calculate"><button type="button" class="button small" data-action="structure-planner">${icon('clock')} Рассчитать структуру</button><span>Подберём блайнды и уровни под ваш вечер</span></div><div class="fields two spaced">${numeric('Длительность уровня', 'duration', c.duration, 'мин', 1, 180)}<label class="field"><span>Структура турнира</span><button type="button" class="input-button" data-action="structure"><span id="structure-label">${structureLabel()}</span> ${icon('arrow')}</button></label></div><p class="field-hint" id="structure-hint">${escape(structureHint())}</p><div class="divider"></div>${toggle('Big blind ante', 'Анте оплачивает только большой блайнд', 'ante', c.ante)}<div class="fields two spaced"><label class="field"><span>Перерыв</span><select name="breakEvery">${[0, 3, 4, 6].map(v => `<option value="${v}" ${c.breakEvery === v ? 'selected' : ''}>${v ? `Каждые ${v} уровня` : 'Без перерывов'}</option>`).join('')}</select></label>${numeric('Длительность перерыва', 'breakDuration', c.breakDuration, 'мин', 1, 60)}</div>` : '<p class="field-hint">Блайнды фиксируются на всю сессию. Таймер показывает время игры.</p>'}`)}
     ${section(c.mode === 'tournament' ? 'Взносы и призовые' : 'Вход в игру', '03 / БАНК', `<div class="fields two">${numeric(c.mode === 'tournament' ? 'Бай-ин' : 'Стартовый вход', 'buyin', c.buyin, '₽')}${numeric('Количество игроков', 'seats', c.seats, 'чел.', 2, MAX_PLAYERS)}</div><div class="fields two spaced"><label class="field"><span>Максимум игроков за столом</span><select name="tableCapacity">${Array.from({length:9},(_,i)=>i+2).map(n=>`<option value="${n}" ${c.tableCapacity===n?'selected':''}>${n}</option>`).join('')}</select></label><div class="table-plan"><span>Рассадка</span><strong id="table-plan">${planDescription()}</strong></div></div>${c.mode === 'tournament' ? `<div class="divider"></div><div class="prize-heading"><label for="prize-count">Призовые места</label><select id="prize-count" name="prizeCount">${[1,2,3,4,5].map(n => `<option value="${n}" ${n === c.prizes.length ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div class="prize-inputs">${c.prizes.map((p, i) => numeric(`${i + 1}-е место`, `prize-${i}`, p, '%', 1, 100)).join('')}</div><div id="prize-total" class="field-hint">Всего ${c.prizes.reduce((a,b) => a+b,0)}% из 100%</div>` : '<p class="field-hint">Докупки и сумма при выходе учитываются отдельно для каждого игрока.</p>'}`)}
     ${c.mode==='tournament'?bountySettings():''}</div><aside class="setup-side"><div id="summary">${summaryView()}</div><div class="side-note">${icon('people')}<div><strong>Свои люди за одним столом</strong><p>Сохраним имена и ники — в следующий раз останется только выбрать друзей.</p></div></div></aside></div></fieldset><div class="form-bottom"><span>Все настройки можно изменить до начала игры</span>${state.game ? '<button type="button" class="button primary" data-action="nav" data-step="board">Вернуться к игре</button>' : `<button type="submit" class="button primary">К рассадке ${icon('arrow')}</button>`}</div></form>`;
 }
@@ -241,10 +241,12 @@ function beep() {
 }
 function modal(title, content, button, onConfirm) {
   const dialog = $('#modal');
-  dialog.classList.remove('structure-modal');
+  if (dialog.open) dialog.close();
+  dialog.classList.remove('structure-modal','planner-modal');
   dialog.innerHTML = `<form id="modal-form"><div class="modal-heading"><h2>${title}</h2><button class="mini-button" type="button" data-action="close" aria-label="Закрыть">×</button></div>${content}<div class="modal-actions"><button type="button" class="button subtle" data-action="close">Отмена</button><button class="button primary" type="submit">${button}</button></div></form>`;
   $('#modal-form').onsubmit = event => { event.preventDefault(); if (onConfirm(new FormData(event.currentTarget)) !== false) dialog.close(); };
   dialog.showModal();
+  dialog.scrollTop=0;
 }
 function rememberPlayers() {
   state.seats.forEach(p=>{const existing=state.library.find(x=>x.name.toLocaleLowerCase()===p.name.toLocaleLowerCase());if(existing){ existing.nick=p.nick;p.id=existing.id; } else state.library.push({...p});});
@@ -262,49 +264,59 @@ function clearUndo() { undo=null;delete state.undo; }
 function editorRows(rows) {
   return `<div class="level-editor-row headings"><span>Уровень</span><span>SB</span><span>BB</span><span>Мин.</span></div>${rows.map((l,i)=>`<div class="level-editor-row"><span>${l.kind==='break'?'Перерыв':`# ${l.number}`}</span>${l.kind==='break'?'<span>—</span><span>—</span>':`<input aria-label="SB уровня ${l.number}" name="sb-${i}" type="number" min="1" max="100000000" value="${l.sb}" required><input aria-label="BB уровня ${l.number}" name="bb-${i}" type="number" min="2" max="100000000" value="${l.bb}" required>`}<input aria-label="Минуты ${l.kind==='break'?'перерыва':`уровня ${l.number}`}" name="duration-${i}" type="number" min="1" max="180" value="${l.duration/60}" required></div>`).join('')}`;
 }
-function showStructure() {
-  let rows;
-  try { rows=structuredClone(levels()); } catch { rows=makeLevels(state.config); }
-  const options={targetMinutes:240,extraEntries:0,addons:0,autoBlinds:true,startDepth:100,...state.plannerOptions,...state.autoStructure};
-  if (state.autoStructure && state.autoStructure.autoBlinds === undefined) options.autoBlinds=false;
-  let autoOptions=state.autoStructure ? {...options} : null;
+function showStructurePlanner(draftOptions = null) {
+  const options={targetMinutes:240,extraEntries:0,addons:0,autoBlinds:true,startDepth:100,...state.plannerOptions,...state.autoStructure,...draftOptions};
+  if (!draftOptions && state.autoStructure && state.autoStructure.autoBlinds === undefined) options.autoBlinds=false;
   const c=state.config;
-  modal('Структура турнира', `<div class="structure-planner"><h3>Подобрать под ваш вечер</h3><p>Стек ${number(c.stack)} · ${c.seats} игроков. Уровни около ${c.duration} мин${c.breakEvery?`, перерыв ${c.breakDuration} мин каждые ${c.breakEvery} уровня`:`, без перерывов`}.</p><div class="planner-blinds">${toggle('Подобрать стартовые МБ / ББ','Рассчитать от стартового стека, округлив номиналы','autoBlinds',options.autoBlinds)}<div class="planner-depth">${numeric('Глубина стартового стека','startDepth',options.startDepth,'ББ',20,500)}<p class="field-hint">Обычно 100 ББ. При выключенном автоподборе старт — ${number(c.sb)} / ${number(c.bb)}.</p></div></div><div class="planner-time">${numeric('Желаемая длительность турнира','targetMinutes',options.targetMinutes,'мин',30,1440)}<button type="button" class="button primary" id="calculate-structure">Рассчитать</button></div><details class="planner-extras"><summary>Планируемые ре-энтри и аддоны</summary><p class="field-hint">Необязательно. Укажите суммарное количество за весь турнир, а не на одного игрока.</p><div class="fields two">${numeric('Ре-энтри','extraEntries',options.extraEntries,'шт.',0,1000)}${numeric('Аддоны','addons',options.addons,'шт.',0,1000)}</div></details><div id="plan-summary" class="plan-summary" aria-live="polite"></div></div><p class="field-hint">Это ориентир, а не точное время окончания. Темп игры и фактические докупки повлияют на длительность. Любой уровень можно отредактировать.</p><div class="level-editor">${editorRows(rows)}</div>`, 'Сохранить', data=>{
-    const nextOptions=readOptions();
-    if (autoOptions && Object.keys(nextOptions).some(key=>nextOptions[key]!==autoOptions[key])) { toast('Параметры изменились. Нажмите «Рассчитать» перед сохранением'); return false; }
-    for(let i=0;i<rows.length;i++) {
-      const l=rows[i];l.duration=Number(data.get(`duration-${i}`))*60;
+  modal('Рассчитать структуру', `<p class="planner-context">Стек ${number(c.stack)} · ${c.seats} игроков · уровни около ${c.duration} мин${c.breakEvery?`. Перерывы по ${c.breakDuration} мин каждые ${c.breakEvery} уровня.`:'. Без перерывов.'}</p>${numeric('Желаемая длительность турнира','targetMinutes',options.targetMinutes,'мин',30,1440)}<div class="planner-blinds">${toggle('Подобрать стартовые МБ / ББ','Рассчитать от стартового стека, округлив номиналы','autoBlinds',options.autoBlinds)}<div class="planner-depth">${numeric('Глубина стартового стека','startDepth',options.startDepth,'ББ',20,500)}<p class="field-hint">Обычно 100 ББ. При выключенном автоподборе старт — ${number(c.sb)} / ${number(c.bb)}.</p></div></div><details class="planner-extras"><summary>Планируемые ре-энтри и аддоны</summary><p class="field-hint">Необязательно. Укажите суммарное количество за весь турнир.</p><div class="fields two">${numeric('Ре-энтри','extraEntries',options.extraEntries,'шт.',0,1000)}${numeric('Аддоны','addons',options.addons,'шт.',0,1000)}</div></details><p class="field-hint planner-note">Время ориентировочное: темп игры и докупки могут его изменить. На следующем шаге вы увидите уровни и сможете их поправить.</p><p id="planner-error" class="planner-error" role="alert" hidden></p>`, 'Рассчитать', data=>{
+    const nextOptions={...Object.fromEntries(['targetMinutes','extraEntries','addons'].map(key=>[key,Number(data.get(key))])),startDepth:Number($('#modal [name="startDepth"]').value)||options.startDepth,autoBlinds:data.has('autoBlinds')};
+    let plan;
+    try { plan=recommendStructure(c,nextOptions); }
+    catch(error) { $('#planner-error').textContent=error.message;$('#planner-error').hidden=false;return false; }
+    showStructure({plan,options:nextOptions});
+    return false; // Keep the replacement dialog open.
+  });
+  $('#modal').classList.add('planner-modal');
+  const updateDepth=()=>{ $('#modal [name="startDepth"]').disabled=!$('#modal [name="autoBlinds"]').checked; };
+  updateDepth();
+  $('#modal-form').oninput=event=>{
+    if(event.target.name==='autoBlinds') updateDepth();
+    $('#planner-error').hidden=true;
+  };
+}
+function showStructure(draft = null) {
+  let rows;
+  try { rows=structuredClone(draft ? draft.plan.levels : levels()); } catch { rows=makeLevels(state.config); }
+  let autoOptions=draft ? {...draft.options} : state.autoStructure ? {...state.autoStructure} : null;
+  const c=state.config;
+  const overview=()=>`${rows.filter(l=>l.kind==='level').length} уровней · ${number(rows.reduce((sum,l)=>sum+l.duration,0)/60)} мин с перерывами`;
+  const note=autoOptions?'Уровни рассчитаны автоматически. Любое значение можно изменить.':'Блайнды и длительность можно изменить для каждого уровня.';
+  const warnings=draft ? `${draft.plan.maxIncrease>2?'<p class="structure-warning">Блайнды местами растут больше чем вдвое. Для более плавной игры увеличьте время турнира или сократите длительность уровней.</p>':''}${draft.plan.startDepth<30?'<p class="structure-warning">На старте меньше 30 ББ. Для более глубокой игры уменьшите стартовые блайнды.</p>':''}` : '';
+  modal('Структура турнира', `<div class="structure-overview"><strong id="structure-total">${overview()}</strong>${draft?`<button type="button" class="text-button" id="revise-structure">${icon('back')} Параметры расчёта</button>`:''}</div><p id="structure-editor-note" class="field-hint">${note}</p>${warnings}<div class="level-editor">${editorRows(rows)}</div>`, 'Сохранить', data=>{
+    const edited=structuredClone(rows);
+    for(let i=0;i<edited.length;i++) {
+      const l=edited[i];l.duration=Number(data.get(`duration-${i}`))*60;
       if(l.kind==='level') { l.sb=Number(data.get(`sb-${i}`));l.bb=Number(data.get(`bb-${i}`));l.ante=c.ante?l.bb:0;
         if(l.sb>=l.bb){toast(`Уровень ${l.number}: BB должен быть больше SB`);return false;}
       }
     }
-    state.plannerOptions=readOptions();
-    state.config.sb=rows[0].sb;state.config.bb=rows[0].bb;
+    if(draft) state.plannerOptions={...draft.options};
+    state.config.sb=edited[0].sb;state.config.bb=edited[0].bb;
     if(autoOptions) { state.autoStructure=autoOptions;delete state.levels; }
-    else { delete state.autoStructure;state.levels=rows; }
+    else { delete state.autoStructure;state.levels=edited; }
     store();render();
   });
   $('#modal').classList.add('structure-modal');
-  const readOptions=()=>({...Object.fromEntries(['targetMinutes','extraEntries','addons','startDepth'].map(key=>[key,Number($(`#modal [name="${key}"]`).value)])),autoBlinds:$('#modal [name="autoBlinds"]').checked});
-  const updateDepth=()=>{ $('#modal [name="startDepth"]').disabled=!$('#modal [name="autoBlinds"]').checked; };
-  updateDepth();
-  const showPlan=plan=>{
-    const durations=plan.levels.filter(l=>l.kind==='level').map(l=>l.duration/60),min=Math.min(...durations),max=Math.max(...durations);
-    $('#plan-summary').innerHTML=`<strong>${durations.length} уровней по ${min===max?min:`${min}–${max}`} мин · всего ${plan.targetMinutes} мин</strong><span>Старт МБ / ББ: <b>${number(plan.startSB)} / ${number(plan.startBB)}</b> · стек ≈ ${number(Math.round(plan.startDepth*10)/10)} ББ.</span><span>Игра ${plan.playingMinutes} мин + перерывы ${plan.breakMinutes} мин. В расчёте ${number(plan.chips)} фишек.</span><span>Финальный BB ${number(plan.finalBB)}: ориентир — около 20 BB во всех фишках турнира.</span>${plan.maxIncrease>2?'<span class="plan-warning">Для такого срока блайнды местами растут больше чем вдвое. Увеличьте время турнира или сократите уровни в настройках для более плавной игры.</span>':''}${plan.startDepth<30?'<span class="plan-warning">На старте меньше 30 BB. Для более глубокой игры уменьшите стартовые блайнды.</span>':''}`;
-  };
-  if(autoOptions) { try { showPlan(recommendStructure(c,autoOptions)); } catch(error) { $('#plan-summary').textContent=error.message; } }
-  else $('#plan-summary').textContent=`Текущая структура: ${rows.reduce((sum,l)=>sum+l.duration,0)/60} мин с перерывами. Нажмите «Рассчитать», чтобы получить предложение.`;
-  $('#calculate-structure').onclick=()=>{
-    for(const el of document.querySelectorAll('.structure-planner input')) if(!el.reportValidity())return;
-    try {
-      const nextOptions=readOptions(), plan=recommendStructure(c,nextOptions);
-      rows=plan.levels;autoOptions=nextOptions;$('.level-editor').innerHTML=editorRows(rows);showPlan(plan);
-    } catch(error) { $('#plan-summary').textContent=error.message; }
-  };
+  if(draft) $('#revise-structure').onclick=()=>showStructurePlanner(draft.options);
   $('#modal-form').oninput=event=>{
-    if(event.target.name==='autoBlinds') updateDepth();
-    if(event.target.closest('.level-editor')) { autoOptions=null;$('#plan-summary').textContent='Ручная структура: ваши правки будут сохранены. Для нового автоподбора нажмите «Рассчитать».'; }
-    else $('#plan-summary').textContent='Параметры изменены. Нажмите «Рассчитать», чтобы обновить предложение.';
+    if(!event.target.closest('.level-editor')) return;
+    autoOptions=null;
+    document.querySelectorAll('.structure-warning').forEach(el=>el.remove());
+    $('#structure-editor-note').textContent='Ручная структура: ваши изменения применятся после сохранения.';
+    if(event.target.name.startsWith('duration-')) {
+      rows[Number(event.target.name.split('-')[1])].duration=Number(event.target.value)*60;
+      $('#structure-total').textContent=overview();
+    }
   };
 }
 
@@ -352,6 +364,7 @@ document.addEventListener('click',async event=>{
   if(action==='home'){event.preventDefault();return go(g?'board':'settings');}
   if(action==='nav'){if(button.dataset.step==='seating'&&!g){const error=setupError();if(error)return toast(error);}return go(button.dataset.step);}
   if(action==='mode'){state.config.mode=button.dataset.mode;try{syncOpeningBlinds();}catch{/* Keep incomplete settings editable. */}store();return render();}
+  if(action==='structure-planner')return showStructurePlanner();
   if(action==='structure')return showStructure();
   if(action==='players'){playersVisible=!playersVisible;render();if(playersVisible)$('#players-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(action==='select-table'){selectedTable=Number(button.dataset.table);$('#table-visual').innerHTML=tableVisual();return;}
