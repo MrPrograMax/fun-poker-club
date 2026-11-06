@@ -1,12 +1,55 @@
 export const defaults = () => ({
   name: 'Покер с друзьями', mode: 'tournament', stack: 10000, sb: 25, bb: 50,
   duration: 20, buyin: 1000, seats: 6, tableCapacity: 10, prizes: [50, 30, 20],
-  breakEvery: 4, breakDuration: 10, ante: false,
+  breakEvery: 4, breakDuration: 10, ante: false, freezeoutAfterBreak: 0,
   reentry: true, addonCost: 500, addonStack: 5000,
   bountyMode: 'off', bountyAmount: 200, bountyImmediate: 50,
 });
 
 export const MAX_PLAYERS = 200;
+export const MAX_STRUCTURE_ROWS = 100;
+
+export function wholeNumber(value, min, max, label = 'Значение') {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`${label}: введите целое число без знаков и дробной части`);
+  const number = Number(text);
+  if (number < min || number > max) throw new Error(`${label}: от ${min.toLocaleString('ru-RU')} до ${max.toLocaleString('ru-RU')}`);
+  return number;
+}
+
+export function validateProfile({ name = '', nick = '' } = {}) {
+  name = String(name).trim().replace(/\s+/g, ' '); nick = String(nick).trim();
+  if (!name && !nick) return 'Укажите имя или ник игрока';
+  if (name.length > 60) return 'Имя: не больше 60 символов';
+  if (name && !/^[\p{L}\p{M}]+(?:[ \p{Pd}'’][\p{L}\p{M}]+)*$/u.test(name)) return 'В имени допустимы буквы, пробелы, дефисы и апострофы. Для цифр используйте поле «Ник»';
+  if (nick.length > 24) return 'Ник: не больше 24 символов';
+  return '';
+}
+
+export function filterPlayers(players, { query = '', table = 0, activeOnly = false, excludeId = null } = {}) {
+  const words = playerNameKey(query).split(' ').filter(Boolean);
+  return players.filter(p => (!table || (Number(table) === -1 ? !p.active : p.table === Number(table))) && (!activeOnly || p.active) && p.id !== excludeId && words.every(word => playerNameKey(`${p.name} ${p.nick || ''}`).includes(word)));
+}
+
+export function seatingDescription(count, capacity) {
+  const groups = new Map();
+  for (const size of seatingPlan(count, capacity)) groups.set(size, (groups.get(size) || 0) + 1);
+  const plural = (n, forms) => forms[n % 100 >= 11 && n % 100 <= 14 ? 2 : n % 10 === 1 ? 0 : n % 10 >= 2 && n % 10 <= 4 ? 1 : 2];
+  return [...groups].map(([size, tables]) => `${tables} ${plural(tables, ['стол', 'стола', 'столов'])} по ${size} ${plural(size, ['игроку', 'игрока', 'игроков'])}`).join(', ') || 'Проверьте количество игроков';
+}
+
+export function validateStructure(rows, freezeoutAfterBreak = 0) {
+  if (!Array.isArray(rows) || !rows.length || rows.length > MAX_STRUCTURE_ROWS) return `Структура: от 1 до ${MAX_STRUCTURE_ROWS} уровней и перерывов`;
+  if (rows[0].kind !== 'level' || rows.at(-1).kind !== 'level') return 'Первой и последней строкой структуры должен быть игровой уровень';
+  for (let i = 0; i < rows.length; i++) {
+    const l = rows[i];
+    if (!['level', 'break'].includes(l.kind) || !Number.isInteger(l.duration / 60) || l.duration < 60 || l.duration > 10800) return `Строка ${i + 1}: длительность от 1 до 180 целых минут`;
+    if (l.kind === 'level' && (![l.sb, l.bb].every(n => Number.isInteger(n) && n >= 1 && n <= 100000000) || l.sb >= l.bb)) return `Уровень ${l.number}: целые блайнды от 1 до 100 000 000, ББ больше МБ`;
+    if (l.kind === 'level' && (!Number.isInteger(l.ante ?? 0) || (l.ante ?? 0) < 0 || (l.ante ?? 0) > 100000000)) return `Уровень ${l.number}: проверьте анте`;
+  }
+  if (!Number.isInteger(freezeoutAfterBreak) || freezeoutAfterBreak < 0 || freezeoutAfterBreak > rows.filter(l => l.kind === 'break').length) return 'Выбранный перерыв для фризаута отсутствует в структуре';
+  return '';
+}
 
 export function seatingPlan(playerCount, tableCapacity = 10) {
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > MAX_PLAYERS ||
@@ -22,6 +65,72 @@ export function seatPlayers(players, tableCapacity = 10) {
     Array.from({ length: count }, (_, seatIndex) => ({
       ...players[offset++], table: tableIndex + 1, seat: seatIndex + 1,
     })));
+}
+
+export function gameTableNumbers(game) {
+  return [...new Set(game.players.filter(p => (!game.seatingManaged || p.active) && p.table > 0).map(p => p.table))].sort((a,b) => a-b);
+}
+
+function vacateSeat(player) {
+  if (player.table != null) { player.lastTable = player.table; player.lastSeat = player.seat; }
+  player.table = null; player.seat = null;
+}
+
+export function planTableBalance(game) {
+  if (game.config.mode !== 'tournament' || game.finished) throw new Error('Рассадка доступна только в текущем турнире');
+  const active = game.players.filter(p => p.active), capacity = game.config.tableCapacity;
+  if (active.length < 2) throw new Error('Для рассадки нужны хотя бы два активных игрока');
+  const current = gameTableNumbers(game).map(table => ({ table, players: active.filter(p => p.table === table).sort((a,b) => a.seat-b.seat) }));
+  const count = Math.ceil(active.length / capacity), base = Math.floor(active.length / count), extra = active.length % count;
+  const targets = current.slice().sort((a,b) => b.players.length-a.players.length || a.table-b.table).slice(0,count);
+  let nextTable = Math.max(0,...current.map(t => t.table)) + 1;
+  while (targets.length < count) targets.push({ table: nextTable++, players: [] });
+  // Keep the fullest tables. Assign spare places where they avoid an extra move;
+  // otherwise fill the smaller tables first, leaving full tables untouched.
+  const extraTables = new Set(targets.slice().sort((a,b) =>
+    Number(b.players.length > base)-Number(a.players.length > base) ||
+    (a.players.length > base ? b.players.length-a.players.length : a.players.length-b.players.length) || a.table-b.table
+  ).slice(0,extra).map(t => t.table));
+  const assignments = new Map(), tables = targets.map(t => ({ table:t.table, count:base+Number(extraTables.has(t.table)) })).sort((a,b) => a.table-b.table);
+  for (const table of tables) {
+    const occupied = new Set();
+    for (const player of active.filter(p => p.table === table.table).sort((a,b) => a.seat-b.seat)) {
+      if (occupied.size >= table.count || !Number.isInteger(player.seat) || player.seat < 1 || player.seat > capacity || occupied.has(player.seat)) continue;
+      occupied.add(player.seat);
+      assignments.set(player.id,{playerId:player.id,fromTable:player.table,fromSeat:player.seat,table:player.table,seat:player.seat});
+    }
+  }
+  const moving = active.filter(p => !assignments.has(p.id)).sort((a,b) => a.table-b.table || a.seat-b.seat);
+  for (const table of tables) {
+    const occupied = new Set([...assignments.values()].filter(p => p.table === table.table).map(p => p.seat));
+    for (let seat = 1; occupied.size < table.count; seat++) {
+      if (occupied.has(seat)) continue;
+      const player = moving.shift();
+      assignments.set(player.id,{playerId:player.id,fromTable:player.table,fromSeat:player.seat,table:table.table,seat});
+      occupied.add(seat);
+    }
+  }
+  const seats = [...assignments.values()].sort((a,b) => a.table-b.table || a.seat-b.seat);
+  const moves = seats.filter(p => p.fromTable !== p.table || p.fromSeat !== p.seat);
+  const closedTables = current.filter(t => !tables.some(next => next.table === t.table)).map(t => t.table);
+  return {activeCount:active.length,capacity,current:current.map(t => ({table:t.table,count:t.players.length})),tables,assignments:seats,moves,closedTables,final:tables.length===1,needsChange:moves.length>0||closedTables.length>0};
+}
+
+export function rebalanceTables(game, now = Date.now(), expectedPlan = null) {
+  const plan = planTableBalance(game);
+  if (expectedPlan && JSON.stringify(plan) !== JSON.stringify(expectedPlan)) throw new Error('Состав столов изменился. Откройте рассадку заново');
+  if (!plan.needsChange) return null;
+  const next = structuredClone(game);
+  advanceClock(next,now);
+  next.seatingManaged = true;
+  for (const player of next.players) {
+    if (!player.active) { vacateSeat(player); continue; }
+    const seat = plan.assignments.find(p => p.playerId === player.id);
+    player.table = seat.table; player.seat = seat.seat;
+  }
+  recordEvent(next,{type:'tables',tables:plan.tables,closedTables:plan.closedTables,moves:plan.moves},now);
+  Object.assign(game,next);
+  return plan;
 }
 
 export function makeLevels(config) {
@@ -125,9 +234,10 @@ export function validateConfig(c) {
   if (!Number.isInteger(c.tableCapacity) || c.tableCapacity < 2 || c.tableCapacity > 10) return 'Вместимость одного стола: от 2 до 10 игроков';
   if (c.mode === 'tournament') {
     if (!Number.isInteger(c.duration) || c.duration < 1 || c.duration > 180) return 'Укажите длительность уровня от 1 до 180 минут';
-    if (c.prizes.some(p => !Number.isFinite(p) || p <= 0) || Math.abs(c.prizes.reduce((a, b) => a + b, 0) - 100) > 0.001) return 'Сумма призовых должна быть равна 100%';
+    if (c.prizes.some(p => !Number.isInteger(p) || p <= 0) || c.prizes.reduce((a, b) => a + b, 0) !== 100) return 'Призовые: целые проценты с суммой 100%';
     if (c.prizes.length > c.seats) return 'Призовых мест не может быть больше, чем игроков';
-    if (!Number.isInteger(c.addonCost) || c.addonCost < 1 || !Number.isInteger(c.addonStack) || c.addonStack < 1) return 'Стоимость и стек аддона должны быть положительными целыми числами';
+    if (![c.addonCost, c.addonStack].every(n => Number.isInteger(n) && n >= 1 && n <= 10000000)) return 'Стоимость и стек аддона: целые числа от 1 до 10 000 000';
+    if (!Number.isInteger(c.freezeoutAfterBreak ?? 0) || (c.freezeoutAfterBreak ?? 0) < 0 || (c.freezeoutAfterBreak ?? 0) > MAX_STRUCTURE_ROWS) return 'Проверьте начало фризаута';
     if (!['off','fixed','progressive'].includes(c.bountyMode)) return 'Выберите режим баунти';
     if (c.bountyMode !== 'off' && (!Number.isInteger(c.bountyAmount) || c.bountyAmount < 1 || c.bountyAmount >= c.buyin)) return 'Баунти должно быть меньше первого взноса';
     if (c.bountyMode === 'progressive' && (!Number.isInteger(c.bountyImmediate) || c.bountyImmediate < 1 || c.bountyImmediate > 99)) return 'Сразу выплачивается от 1 до 99% прогрессивного баунти';
@@ -142,7 +252,9 @@ export function normalizeGame(game) {
   game.config = { ...defaults(), ...game.config };
   delete game.config.addonLimit;
   game.freezeout ??= null;
-  if (game.players.some(p => !Number.isInteger(p.table) || p.table < 1)) {
+  game.finishedAt ??= null;
+  game.completionReason ??= game.finished ? 'recorded' : null;
+  if (game.players.some(p => (!game.seatingManaged || p.active) && (!Number.isInteger(p.table) || p.table < 1))) {
     game.players = seatPlayers(game.players, game.config.tableCapacity);
   }
   game.eliminationOrder ||= game.players.filter(p=>p.place>1).sort((a,b)=>b.place-a.place).map(p=>p.id);
@@ -150,6 +262,7 @@ export function normalizeGame(game) {
   for (const p of game.players) {
     p.mainContribution ??= p.invested; p.bountyPaid ??= 0; p.bounty ??= 0; p.earnedBounty ??= 0;
     p.knockouts ??= 0; p.rebuys ??= p.entries-1; p.reentries ??= 0; p.addons ??= 0;
+    if (game.seatingManaged && !p.active) vacateSeat(p);
   }
   return game;
 }
@@ -160,12 +273,16 @@ function firstEntry(config, player) {
 }
 
 export function createGame(config, levels, players, now = Date.now()) {
+  if (config.mode === 'tournament') {
+    const error = validateStructure(levels, config.freezeoutAfterBreak ?? 0);
+    if (error) throw new Error(error);
+  }
   return {
     config: structuredClone(config), levels: structuredClone(levels),
     players: seatPlayers(players, config.tableCapacity).map(p => firstEntry(config, p)),
     index: 0, remaining: levels[0].duration, elapsed: 0, running: false,
     deadline: null, lastTick: now, finished: false, structureEnded: false,
-    eliminationOrder: [], events: [], winnerBounty: null, freezeout: null,
+    eliminationOrder: [], events: [], winnerBounty: null, freezeout: null, finishedAt: null, completionReason: null,
   };
 }
 
@@ -173,12 +290,12 @@ export const playerNameKey = name => String(name ?? '').normalize('NFKC').trim()
 
 export function registrationTables(game) {
   const capacity = game.config.tableCapacity;
-  const numbers = [...new Set(game.players.map(p => p.table))].sort((a,b) => a-b);
+  const numbers = gameTableNumbers(game);
   const next = Math.max(0, ...numbers) + 1;
   return [...numbers, next].map(table => ({
     table, isNew: table === next,
-    // Keep eliminated players' seats reserved for their possible re-entry.
-    seats: Array.from({length:capacity}, (_,i) => i+1).filter(seat => !game.players.some(p => p.table === table && p.seat === seat)),
+    // Before the first redistribution, preserve the original re-entry seats.
+    seats: Array.from({length:capacity}, (_,i) => i+1).filter(seat => !game.players.some(p => (!game.seatingManaged || p.active) && p.table === table && p.seat === seat)),
   }));
 }
 
@@ -187,10 +304,10 @@ export function registerPlayer(game, profile, placement = null, now = Date.now()
   if (game.players.length >= MAX_PLAYERS) throw new Error(`В игре уже ${MAX_PLAYERS} игроков`);
   const name = String(profile?.name ?? '').trim().replace(/\s+/g, ' ');
   const nick = String(profile?.nick ?? '').trim();
-  if (!name || name.length > 60) throw new Error('Укажите имя игрока: от 1 до 60 символов');
-  if (nick.length > 24) throw new Error('Ник: не больше 24 символов');
+  const profileError = validateProfile({ name, nick });
+  if (profileError) throw new Error(profileError);
   if (typeof profile?.id !== 'string' || !profile.id.trim()) throw new Error('Не указан идентификатор игрока');
-  if (game.players.some(p => p.id === profile.id || playerNameKey(p.name) === playerNameKey(name))) {
+  if (game.players.some(p => p.id === profile.id || playerNameKey(p.name || p.nick) === playerNameKey(name || nick))) {
     throw new Error(game.config.mode === 'cash' ? 'Этот игрок уже зарегистрирован. Добавьте вход в его карточке.' : 'Этот игрок уже зарегистрирован. Для возвращения используйте ре-энтри в его карточке.');
   }
   const tables = registrationTables(game);
@@ -217,9 +334,12 @@ export function advanceClock(game, now = Date.now()) {
   let changed = false;
   while (now >= game.deadline && game.running) {
     if (game.index + 1 < game.levels.length) {
+      const transitionAt = game.deadline;
       game.index++;
       game.deadline += game.levels[game.index].duration * 1000;
+      applyScheduledFreezeout(game, transitionAt);
     } else {
+      game.elapsed -= Math.max(0, now - game.deadline);
       game.running = false;
       game.structureEnded = true;
       game.remaining = 0;
@@ -247,16 +367,23 @@ export function jumpLevel(game, index, now = Date.now()) {
   game.remaining = game.levels[index].duration;
   game.lastTick = now;
   game.deadline = game.running ? now + game.remaining * 1000 : null;
+  applyScheduledFreezeout(game, now);
 }
 
-export function restoreAction(game, snapshot, now = Date.now()) {
-  if (game.freezeout && !snapshot.freezeout) {
+export function restoreAction(game, snapshot, now = Date.now(), kind = 'operation') {
+  if (kind === 'clock' || (game.freezeout && !game.freezeout.automatic && !snapshot.freezeout)) {
     const restored = normalizeGame(structuredClone(snapshot));
     advanceClock(restored, now);
     return restored;
   }
   advanceClock(game, now);
   const restored = structuredClone(snapshot);
+  restored.levels = structuredClone(game.levels);
+  if (game.freezeout?.automatic && !restored.freezeout) {
+    restored.freezeout = structuredClone(game.freezeout);
+    const phaseEvent = game.events.find(e => e.type === 'freezeout' && e.automatic);
+    if (phaseEvent) restored.events.push(structuredClone(phaseEvent));
+  }
   // Revert the operation, while keeping the clock and level as the host left them.
   for (const key of ['index', 'remaining', 'elapsed', 'running', 'deadline', 'lastTick', 'structureEnded']) restored[key] = game[key];
   if (restored.finished) { restored.running = false; restored.deadline = null; }
@@ -267,7 +394,7 @@ export function startFreezeout(game, now = Date.now(), { addonCost = game.config
   if (game.config.mode !== 'tournament' || game.finished || game.structureEnded || game.freezeout) return false;
   if (![addonCost, addonStack].every(value => Number.isInteger(value) && value >= 1 && value <= 10000000)) throw new Error('Стоимость и фишки аддона: целые числа от 1 до 10 000 000');
   advanceClock(game, now);
-  if (game.structureEnded) return false;
+  if (game.structureEnded || game.freezeout) return false;
   let index = game.index;
   while (index < game.levels.length && game.levels[index].kind !== 'level') index++;
   if (index === game.levels.length) return false;
@@ -283,11 +410,12 @@ export function startFreezeout(game, now = Date.now(), { addonCost = game.config
   return true;
 }
 
-export function eliminate(game, id, now = Date.now(), killerId = null) {
+export function eliminate(game, id, now = Date.now(), killerId = null, { allowOtherTable = false } = {}) {
   const player = game.players.find(p => p.id === id);
   if (!player?.active || game.finished) return;
   const killer = game.config.bountyMode === 'off' ? null : game.players.find(p=>p.id===killerId && p.active && p.id!==id);
   if (game.config.bountyMode !== 'off' && !killer) throw new Error('Выберите игрока, который выбил участника');
+  if (killer && killer.table !== player.table && !allowOtherTable) throw new Error('Игрок за другим столом. Уточните стол выбившего');
   advanceClock(game, now);
   if (killer) {
     killer.knockouts++;
@@ -298,12 +426,15 @@ export function eliminate(game, id, now = Date.now(), killerId = null) {
     player.bounty=0;
   } else recordEvent(game,{type:'knockout',playerId:id,killerId:null,amount:0,carried:0},now);
   player.active = false;
+  if (game.seatingManaged) vacateSeat(player);
   game.eliminationOrder.push(id);
   updatePlaces(game);
   const alive = game.players.filter(p => p.active);
   if (alive.length === 1) {
     alive[0].place = 1;
     game.finished = true;
+    game.finishedAt = now;
+    game.completionReason = 'elimination';
     game.running = false;
     game.deadline = null;
     const winner=alive[0];
@@ -324,9 +455,16 @@ function recordEvent(game,event,now=Date.now()) {
 export function addEntry(game,id,type,now=Date.now()) {
   const p=game.players.find(p=>p.id===id);
   if(!p || game.config.mode!=='tournament')throw new Error('Игрок не найден');
+  if(game.finished && game.completionReason === 'manual') throw new Error('Сначала отмените завершение турнира');
   if(type==='reentry') {
     if(p.active || !game.config.reentry)throw new Error('Ре-энтри недоступен');
   } else if(!p.active || game.finished || type!=='addon')throw new Error('Докупка недоступна');
+  let placement;
+  if (type === 'reentry' && game.seatingManaged) {
+    const tables = registrationTables(game);
+    const table = tables.filter(t => t.seats.length && !t.isNew).sort((a,b) => b.seats.length-a.seats.length || a.table-b.table)[0] || tables.at(-1);
+    placement = {table:table.table,seat:table.seats[0]};
+  }
   advanceClock(game,now);
   const amount=type==='addon'?game.config.addonCost:game.config.buyin;
   // Re-entry restores a head from the contribution; add-ons stay in prizes.
@@ -343,8 +481,10 @@ export function addEntry(game,id,type,now=Date.now()) {
       game.winnerBounty=null;
     }
     p.active=true;p.reentries++;p.entries++;
+    if (placement) Object.assign(p,placement);
     game.eliminationOrder=game.eliminationOrder.filter(x=>x!==id);
     game.finished=false;
+    game.finishedAt=null;game.completionReason=null;
     updatePlaces(game);
   } else p.addons++;
   recordEvent(game,{type,playerId:id,amount,bounty,chips:type==='addon'?game.config.addonStack:game.config.stack},now);
@@ -356,4 +496,128 @@ export function formatTime(seconds, hours = false) {
   const m = Math.floor(value / 60) % 60;
   const s = value % 60;
   return hours || h ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function applyScheduledFreezeout(game, now) {
+  if (game.config.mode !== 'tournament' || game.finished || game.freezeout || !game.config.freezeoutAfterBreak) return;
+  let breaks = 0;
+  const boundary = game.levels.findIndex(l => l.kind === 'break' && ++breaks === game.config.freezeoutAfterBreak);
+  const next = game.levels.findIndex((l, i) => i > boundary && l.kind === 'level');
+  if (boundary < 0 || next < 0 || game.index < next) return;
+  game.freezeout = { startedAt: now, level: game.levels[next].number, automatic: true };
+  recordEvent(game, { type: 'freezeout', level: game.freezeout.level, automatic: true, addonCost: game.config.addonCost, addonStack: game.config.addonStack }, now);
+}
+
+export function setAddonTerms(game, addonCost, addonStack, now = Date.now()) {
+  if (game.finished || game.config.mode !== 'tournament') throw new Error('Условия аддона сейчас недоступны');
+  if (![addonCost, addonStack].every(n => Number.isInteger(n) && n >= 1 && n <= 10000000)) throw new Error('Стоимость и фишки аддона: целые числа от 1 до 10 000 000');
+  advanceClock(game, now);
+  Object.assign(game.config, { addonCost, addonStack });
+  recordEvent(game, { type: 'addon-terms', addonCost, addonStack }, now);
+}
+
+export function extendLevel(game, minutes, now = Date.now(), expectedIndex = game.index) {
+  if (game.config.mode !== 'tournament' || game.finished) throw new Error('Продление уровня недоступно');
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 180) throw new Error('Продление: от 1 до 180 целых минут');
+  const next = structuredClone(game);
+  advanceClock(next, now);
+  if (next.index !== expectedIndex) throw new Error('Уровень уже сменился. Откройте продление ещё раз');
+  const level = next.levels[next.index], seconds = minutes * 60;
+  if (level.duration + seconds > 10800) throw new Error('Общая длительность уровня не должна превышать 180 минут');
+  level.duration += seconds;
+  next.remaining += seconds;
+  next.structureEnded = false;
+  next.lastTick = now;
+  next.deadline = next.running ? now + next.remaining * 1000 : null;
+  recordEvent(next, { type: 'extend', index: next.index, level: level.number, minutes }, now);
+  Object.assign(game, next);
+}
+
+export function moveStructureRow(rows, from, to, freezeoutAfterBreak = 0, lockedThrough = -1) {
+  if (![from, to].every(i => Number.isInteger(i) && i >= 0 && i < rows.length)) throw new Error('Строку нельзя переместить за пределы структуры');
+  if (rows[from].kind !== 'break') throw new Error('Перемещать можно только перерывы');
+  if (from <= lockedThrough || to <= lockedThrough) throw new Error('Перемещать можно только будущие перерывы, не затрагивая текущие и прошедшие строки');
+  const scheduledBreak = rows.filter(l => l.kind === 'break')[freezeoutAfterBreak - 1];
+  const reordered = rows.slice();
+  reordered.splice(to, 0, reordered.splice(from, 1)[0]);
+  let number = 0;
+  return {
+    rows: reordered.map(l => ({ ...l, ...(l.kind === 'level' ? { number: ++number } : {}) })),
+    freezeoutAfterBreak: scheduledBreak ? reordered.filter(l => l.kind === 'break').indexOf(scheduledBreak) + 1 : freezeoutAfterBreak,
+  };
+}
+
+export function editFutureStructure(game, rows, now = Date.now(), { freezeoutAfterBreak = game.config.freezeoutAfterBreak ?? 0 } = {}) {
+  if (game.config.mode !== 'tournament' || game.finished) throw new Error('Изменение структуры недоступно');
+  const error = validateStructure(rows, freezeoutAfterBreak);
+  if (error) throw new Error(error);
+  const next = structuredClone(game);
+  advanceClock(next, now);
+  if (rows.length <= next.index || next.levels.slice(0, next.index + 1).some((l, i) => JSON.stringify(l) !== JSON.stringify(rows[i]))) throw new Error('Прошедшие и текущий уровни менять нельзя. Если таймер перешёл дальше, откройте структуру заново');
+  const oldLength = next.levels.length;
+  next.levels = structuredClone(rows);
+  next.config.freezeoutAfterBreak = freezeoutAfterBreak;
+  if (next.structureEnded && rows.length > oldLength) {
+    next.index = oldLength;
+    next.remaining = rows[next.index].duration;
+    next.structureEnded = false;
+    next.deadline = null;
+    next.lastTick = now;
+    applyScheduledFreezeout(next, now);
+  }
+  recordEvent(next, { type: 'structure', count: rows.filter(l => l.kind === 'level').length }, now);
+  Object.assign(game, next);
+}
+
+export function finishGame(game, now = Date.now()) {
+  if (game.finished) return false;
+  if (game.config.mode === 'cash' && game.players.some(p => p.cashout === null)) throw new Error('Сначала запишите сумму выхода каждого игрока');
+  advanceClock(game, now);
+  game.finished = true;
+  game.running = false;
+  game.deadline = null;
+  game.finishedAt = now;
+  game.completionReason = game.config.mode === 'cash' ? 'cashout' : 'manual';
+  // Ending a schedule or an evening does not establish finishing places or award live bounties.
+  recordEvent(game, { type: 'finish', unresolved: game.players.filter(p => p.place == null).length }, now);
+  return true;
+}
+
+export function gameResults(game) {
+  const cash = game.config.mode === 'cash', pool = poolOf(game), prizes = cash ? [] : payouts(pool, game.config.prizes);
+  const rows = game.players.map(p => {
+    const prize = cash ? p.cashout : p.place == null ? null : (prizes[p.place - 1] || 0);
+    const bounty = cash ? 0 : p.earnedBounty;
+    const total = prize === null ? null : prize + bounty;
+    return { ...p, prize, bountyWon: bounty, total, net: total === null ? null : total - p.invested };
+  }).sort((a, b) => cash ? (b.net ?? -Infinity) - (a.net ?? -Infinity) : (a.place ?? Infinity) - (b.place ?? Infinity));
+  return { rows, invested: game.players.reduce((sum, p) => sum + p.invested, 0), pool,
+    unassignedPrize: pool - rows.reduce((sum, p) => sum + (p.prize ?? 0), 0),
+    liveBounties: cash ? 0 : game.players.reduce((sum, p) => sum + p.bounty, 0) };
+}
+
+export function exportGameResults(game) {
+  if (!game.finished) throw new Error('Выгрузка доступна после завершения игры');
+  const result = gameResults(game), cash = game.config.mode === 'cash';
+  // Export an explicit set of fields: profiles and event history stay in the app.
+  return {
+    schemaVersion: 1, mode: game.config.mode, currency: 'RUB',
+    bountyMode: cash ? 'off' : game.config.bountyMode,
+    finishedAt: game.finishedAt == null ? null : new Date(game.finishedAt).toISOString(),
+    durationSeconds: Math.floor(game.elapsed / 1000),
+    summary: {
+      playerCount: result.rows.length, invested: result.invested,
+      totalWinnings: result.rows.some(p => p.total === null) ? null : result.rows.reduce((sum, p) => sum + p.total, 0),
+      unassignedPrize: result.unassignedPrize, unclaimedBounties: result.liveBounties,
+    },
+    players: result.rows.map(p => ({
+      nick: p.nick?.trim() || `Игрок ${game.players.findIndex(player => player.id === p.id) + 1}`,
+      place: p.place ?? null, invested: p.invested, entries: p.entries,
+      reentries: p.reentries, addons: p.addons,
+      extraBuyins: cash ? Math.max(0, p.entries - 1) : (p.rebuys || 0),
+      knockouts: cash || game.config.bountyMode === 'off' ? null : p.knockouts,
+      prize: cash ? null : p.prize, cashout: cash ? p.prize : null,
+      bountyWon: p.bountyWon, totalWinnings: p.total, netResult: p.net,
+    })),
+  };
 }
