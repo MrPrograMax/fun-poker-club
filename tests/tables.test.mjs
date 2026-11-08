@@ -62,6 +62,34 @@ test('reentry and late registration after merging use current free seats and can
   assert.ok(registrationTables(g).find(t=>t.table===1).seats.includes(1));
   assert.equal(g.players.reduce((sum,p)=>sum+p.invested,0),poolOf(g)+bountyPoolOf(g));
 });
+test('a table roster retains eliminated players for reentry after managed seating frees their seats',()=>{
+  const g=game([3,3],6);
+  eliminate(g,'p6',1);rebalanceTables(g,2);
+  const before=structuredClone(g);
+  eliminate(g,'p1',3);
+  const out=g.players.find(p=>p.id==='p1');
+  assert.equal(out.table,null);assert.equal(out.lastTable,1);
+  assert.ok(filterPlayers(g.players,{table:1,includeLastTable:true}).some(p=>p.id==='p1'));
+  assert.deepEqual(filterPlayers(g.players,{table:1,query:'P1',includeLastTable:true}).map(p=>p.id),['p1']);
+  assert.ok(!filterPlayers(g.players,{table:1,activeOnly:true,includeLastTable:true}).some(p=>p.id==='p1'));
+  assert.ok(!filterPlayers(g.players,{table:1}).some(p=>p.id==='p1'));
+  assert.deepEqual(filterPlayers(g.players,{table:-1,includeLastTable:true}).map(p=>p.id),['p1','p6']);
+  assert.equal(g.players.find(p=>p.id==='p6').lastTable,2);
+  const loaded=normalizeGame(JSON.parse(JSON.stringify(g)));
+  assert.ok(filterPlayers(loaded.players,{table:1,includeLastTable:true}).some(p=>p.id==='p1'));
+  addEntry(loaded,'p1','reentry',4);
+  assert.equal(filterPlayers(loaded.players,{table:1,includeLastTable:true}).filter(p=>p.id==='p1').length,1);
+  assert.ok(!filterPlayers(loaded.players,{table:-1}).some(p=>p.id==='p1'));
+  const restored=restoreAction(g,before,5);
+  assert.equal(filterPlayers(restored.players,{table:1,includeLastTable:true}).filter(p=>p.id==='p1').length,1);
+  assert.equal(restored.players.find(p=>p.id==='p1').active,true);
+});
+test('active players never match their previous table after returning at a different table',()=>{
+  const players=[{id:'back',name:'',nick:'Back',active:true,table:3,lastTable:1},{id:'out',name:'',nick:'Out',active:false,table:null,lastTable:1}];
+  assert.deepEqual(filterPlayers(players,{table:1,includeLastTable:true}).map(p=>p.id),['out']);
+  assert.deepEqual(filterPlayers(players,{table:3,includeLastTable:true}).map(p=>p.id),['back']);
+  assert.deepEqual(filterPlayers(players,{table:1,includeLastTable:true,excludeId:'out'}),[]);
+});
 test('a stale preview and unavailable game states cannot mutate seating or the timer',()=>{
   const g=game([8,4,5]);toggleClock(g,0);const plan=planTableBalance(g);eliminate(g,'p1',1);
   const before=structuredClone(g);assert.throws(()=>rebalanceTables(g,10000,plan),/изменился/);assert.deepEqual(g,before);

@@ -26,9 +26,13 @@ export function validateProfile({ name = '', nick = '' } = {}) {
   return '';
 }
 
-export function filterPlayers(players, { query = '', table = 0, activeOnly = false, excludeId = null } = {}) {
+export function filterPlayers(players, { query = '', table = 0, activeOnly = false, excludeId = null, includeLastTable = false } = {}) {
   const words = playerNameKey(query).split(' ').filter(Boolean);
-  return players.filter(p => (!table || (Number(table) === -1 ? !p.active : p.table === Number(table))) && (!activeOnly || p.active) && p.id !== excludeId && words.every(word => playerNameKey(`${p.name} ${p.nick || ''}`).includes(word)));
+  return players.filter(p => {
+    // The roster keeps reentry available after elimination frees the seat.
+    const playerTable = p.table ?? (includeLastTable && !p.active ? p.lastTable : null);
+    return (!table || (Number(table) === -1 ? !p.active : playerTable === Number(table))) && (!activeOnly || p.active) && p.id !== excludeId && words.every(word => playerNameKey(`${p.name} ${p.nick || ''}`).includes(word));
+  });
 }
 
 export function seatingDescription(count, capacity) {
@@ -388,6 +392,38 @@ export function restoreAction(game, snapshot, now = Date.now(), kind = 'operatio
   for (const key of ['index', 'remaining', 'elapsed', 'running', 'deadline', 'lastTick', 'structureEnded']) restored[key] = game[key];
   if (restored.finished) { restored.running = false; restored.deadline = null; }
   return normalizeGame(restored);
+}
+
+export const MAX_UNDO_STEPS = 50;
+const HISTORY_STATE_BYTES = 900 * 1024;
+
+export function actionHistory(state) {
+  if (!Array.isArray(state.undoHistory)) {
+    state.undoHistory = state.undo ? [{ game: state.undo, kind: state.undoKind || 'operation' }] : [];
+  }
+  delete state.undo; delete state.undoKind;
+  return state.undoHistory;
+}
+
+export function rememberAction(state, snapshot = state.game, kind = 'operation') {
+  const history = actionHistory(state);
+  history.push({ game: structuredClone(snapshot), kind });
+  if (history.length > MAX_UNDO_STEPS) history.splice(0, history.length - MAX_UNDO_STEPS);
+  // Leave room below the server's 1 MiB limit, including large player libraries.
+  while (history.length && new TextEncoder().encode(JSON.stringify(state)).byteLength > HISTORY_STATE_BYTES) history.shift();
+}
+
+export function undoAction(state, now = Date.now()) {
+  const history = actionHistory(state), previous = history.at(-1);
+  if (!previous || !state.game) return false;
+  const restored = restoreAction(state.game, previous.game, now, previous.kind);
+  history.pop(); state.game = restored;
+  return true;
+}
+
+export function clearActionHistory(state) {
+  state.undoHistory = [];
+  delete state.undo; delete state.undoKind;
 }
 
 export function startFreezeout(game, now = Date.now(), { addonCost = game.config.addonCost, addonStack = game.config.addonStack } = {}) {

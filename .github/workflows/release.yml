@@ -93,4 +93,9 @@ jobs:
           Сборки пока без цифровой подписи: при первом запуске macOS или Windows могут запросить разрешение на открытие.
           NOTES
           mapfile -d '' assets < <(find release-files -type f \( -name '*.zip' -o -name SHA256SUMS.txt \) -print0)
-          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Until Morning $RELEASE_TAG" --notes-file release-notes.md
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --title "Until Morning $RELEASE_TAG" --notes-file release-notes.md --latest
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Until Morning $RELEASE_TAG" --notes-file release-notes.md
+          fi

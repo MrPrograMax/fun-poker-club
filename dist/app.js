@@ -1,5 +1,6 @@
-import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendOpeningBlinds, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, registerPlayer, registrationTables, playerNameKey, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, restoreAction, eliminate, formatTime } from './engine.js';
+import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendOpeningBlinds, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, registerPlayer, registrationTables, playerNameKey, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, eliminate, formatTime } from './engine.js';
 import { MAX_STRUCTURE_ROWS, wholeNumber, validateProfile, validateStructure, seatingDescription, filterPlayers, extendLevel, editFutureStructure, moveStructureRow, finishGame, gameResults, exportGameResults, setAddonTerms, gameTableNumbers, planTableBalance, rebalanceTables } from './engine.js';
+import { actionHistory, rememberAction, undoAction, clearActionHistory } from './engine.js';
 
 const KEY = 'river-poker-v1';
 const $ = selector => document.querySelector(selector);
@@ -59,7 +60,7 @@ state.config = { ...defaults(), ...state.config };
 delete state.config.addonLimit;
 try { syncOpeningBlinds(); } catch { /* Incomplete setup remains editable. */ }
 if (state.game) normalizeGame(state.game);
-undo = state.undo || null;
+undo = actionHistory(state).at(-1)?.game || null;
 
 function store() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { toast('Не удалось сохранить в браузере. Проверьте свободное место.'); }
@@ -266,10 +267,17 @@ function resultStatistics(g, result) {
   return `${leaders.length?`<div class="result-highlight"><span class="result-highlight-icon">${icon('people')}</span><div><span>Больше всего нокаутов</span><strong>${leaders.map(p=>escape(nameOf(p))).join(' · ')}</strong></div><b>${number(mostKnockouts)}<small>${leaders.length>1?'у каждого':'за турнир'}</small></b></div>`:''}<div class="results-table-wrap"><table class="results-table"><caption class="sr-only">Статистика игроков за текущую игру</caption><thead><tr><th scope="col">${cash?'Игрок':'Место / игрок'}</th>${columns.map(c=>`<th scope="col">${c.label}</th>`).join('')}</tr></thead><tbody>${result.rows.map(p=>`<tr><td>${resultPlayerCell(g,p)}</td>${columns.map(c=>`<td>${formatValue(c.value(p))}</td>`).join('')}</tr>`).join('')}</tbody><tfoot><tr><th scope="row">Всего</th>${columns.map(c=>`<td>${formatValue(totalValue(c))}</td>`).join('')}</tr></tfoot></table></div><p class="field-hint">${cash?'Входы включают первый взнос и все докупки.':'Статистика за текущий турнир, включая все ре-энтри.'}${!cash&&!bounty?' В формате без баунти выбивания не учитываются.':''}</p>`;
 }
 function playerFilterBar(g, query, table, prefix) {
-  return `<div class="player-filters"><label class="field"><span>Поиск по имени или нику</span><input type="search" id="${prefix}-query" name="${prefix}Query" value="${escape(query)}" placeholder="Начните вводить имя или ник" autocomplete="off"></label><label class="field"><span>Стол</span><select id="${prefix}-table" name="${prefix}Table"><option value="0" ${!table?'selected':''}>${g.seatingManaged?'Все участники':'Все столы'}</option>${g.seatingManaged&&prefix==='roster'?`<option value="-1" ${table===-1?'selected':''}>Выбывшие</option>`:''}${gameTableNumbers(g).map(n=>`<option value="${n}" ${n===table?'selected':''}>Стол ${n}</option>`).join('')}</select></label></div>`;
+  return `<div class="player-filters"><label class="field"><span>Поиск по имени или нику</span><input type="search" id="${prefix}-query" name="${prefix}Query" value="${escape(query)}" placeholder="Начните вводить имя или ник" autocomplete="off"></label><label class="field"><span>Стол</span><select id="${prefix}-table" name="${prefix}Table"><option value="0" ${!table?'selected':''}>${prefix==='roster'?'Все участники':'Все столы'}</option>${g.config.mode==='tournament'&&prefix==='roster'?`<option value="-1" ${table===-1?'selected':''}>Выбывшие</option>`:''}${gameTableNumbers(g).map(n=>`<option value="${n}" ${n===table?'selected':''}>Стол ${n}</option>`).join('')}</select></label></div>`;
+}
+function rosterPlayers(g) {
+  return filterPlayers(g.players,{query:rosterQuery,table:rosterTable,includeLastTable:true});
+}
+function rosterSummary(g) {
+  const out=g.players.filter(p=>!p.active).length;
+  return `<p class="field-hint" id="roster-count">Показано ${rosterPlayers(g).length} из ${g.players.length}</p>${g.config.mode==='tournament'&&out?`<button type="button" class="button small subtle" data-action="${rosterTable===-1?'roster-all':'roster-eliminated'}">${rosterTable===-1?'Все участники':`Выбывшие · ${out}`}</button>`:''}`;
 }
 function rosterItems(g) {
-  const players=filterPlayers(g.players,{query:rosterQuery,table:rosterTable});
+  const players=rosterPlayers(g);
   return players.length?players.map(p=>playerCard(g,p)).join(''):'<p class="empty-players" role="status">Игроки не найдены. Измените запрос или выберите другой стол.</p>';
 }
 function showKnockout(g, player) {
@@ -317,7 +325,7 @@ function playerActions(g, p) {
 }
 function playerCard(g, p) {
   const c=g.config, cash=c.mode==='cash', bounty=!cash&&c.bountyMode!=='off';
-  const seat=p.place?`${p.place}-е место`:`Стол ${p.table} · место ${p.seat}`;
+  const seat=p.place?`${p.place}-е место${!p.active&&p.lastTable?` · был за столом ${p.lastTable}`:''}`:`Стол ${p.table} · место ${p.seat}`;
   const stat=(label,value)=>`<div><dt>${label}</dt><dd>${value}</dd></div>`;
   const result=cash&&p.cashout!==null?p.cashout-p.invested:null;
   const payout=g.finished&&!cash&&p.place!=null?(payouts(poolOf(g),c.prizes)[p.place-1]||0)+p.earnedBounty:null;
@@ -351,13 +359,13 @@ function showTableManagement() {
   $('#modal').classList.add('table-management-modal');
 }
 function rosterView(g) {
-  return section('Участники игры',`<span class="roster-tools">${g.config.mode==='tournament'?`<button type="button" class="button small subtle" data-action="manage-tables" ${g.finished?'disabled':''}>${icon('people')} Управление столами</button>`:''}<button type="button" class="button small register-player-button" data-action="register-player" ${g.finished||g.players.length>=MAX_PLAYERS?'disabled':''}>${icon('plus')} Добавить игрока</button>${undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':''}</span>`,`${playerFilterBar(g,rosterQuery,rosterTable,'roster')}<p class="field-hint" id="roster-count">Показано ${filterPlayers(g.players,{query:rosterQuery,table:rosterTable}).length} из ${g.players.length}</p><div class="roster" id="roster-list">${rosterItems(g)}</div>${g.config.mode==='tournament'?'<p class="field-hint">Ре-энтри доступен после выбывания. Аддон — в меню «⋯» у активного игрока.</p>':''}`,'roster-panel');
+  return section('Участники игры',`<span class="roster-tools">${g.config.mode==='tournament'?`<button type="button" class="button small subtle" data-action="manage-tables" ${g.finished?'disabled':''}>${icon('people')} Управление столами</button>`:''}<button type="button" class="button small register-player-button" data-action="register-player" ${g.finished||g.players.length>=MAX_PLAYERS?'disabled':''}>${icon('plus')} Добавить игрока</button>${undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':''}</span>`,`${playerFilterBar(g,rosterQuery,rosterTable,'roster')}<div class="roster-summary" id="roster-summary">${rosterSummary(g)}</div><div class="roster" id="roster-list">${rosterItems(g)}</div>${g.config.mode==='tournament'?'<p class="field-hint">Ре-энтри доступен после выбывания. Аддон — в меню «⋯» у активного игрока.</p>':''}`,'roster-panel');
 }
 
 function eventView(g) {
   if(!g.events?.length)return '';
   const player=id=>escape(nameOf(g.players.find(p=>p.id===id)||{name:'Игрок'}));
-  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary><div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='tables'?`Рассадка обновлена · ${tableLabel(e.tables.length)} · пересадок: ${e.moves.length}${e.closedTables.length?` · закрыты столы: ${e.closedTables.join(', ')}`:''}`:['extend','structure','finish','addon-terms'].includes(e.type)?escape(e.type==='extend'?`Продление ${e.level?'уровня '+e.level:'перерыва'} на ${e.minutes} мин`:e.type==='structure'?`Структура обновлена · ${e.count} уровней`:e.type==='finish'?'Игра завершена':`Условия аддона: ${money(e.addonCost)} за ${number(e.addonStack)} фишек`):e.type==='freezeout'?`Начат фризаут · уровень ${e.level}${e.addonCost!==undefined?` · аддон ${money(e.addonCost)} за ${number(e.addonStack)} фишек`:''}`:e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{registration:'первый вход',rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}${['registration','addon'].includes(e.type)&&e.chips!==undefined?` · +${number(e.chips)} фишек`:''}${e.type==='registration'?` · стол ${e.table}, место ${e.seat}`:''}`}</span>${i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
+  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary>${undo?`<p class="field-hint">Доступно отмен: ${state.undoHistory.length}. Отменяйте по очереди, начиная с последнего действия.</p>`:''}<div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='correction'?escape(e.description):e.type==='tables'?`Рассадка обновлена · ${tableLabel(e.tables.length)} · пересадок: ${e.moves.length}${e.closedTables.length?` · закрыты столы: ${e.closedTables.join(', ')}`:''}`:['extend','structure','finish','addon-terms'].includes(e.type)?escape(e.type==='extend'?`Продление ${e.level?'уровня '+e.level:'перерыва'} на ${e.minutes} мин`:e.type==='structure'?`Структура обновлена · ${e.count} уровней`:e.type==='finish'?'Игра завершена':`Условия аддона: ${money(e.addonCost)} за ${number(e.addonStack)} фишек`):e.type==='freezeout'?`Начат фризаут · уровень ${e.level}${e.addonCost!==undefined?` · аддон ${money(e.addonCost)} за ${number(e.addonStack)} фишек`:''}`:e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{registration:'первый вход',rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}${['registration','addon'].includes(e.type)&&e.chips!==undefined?` · +${number(e.chips)} фишек`:''}${e.type==='registration'?` · стол ${e.table}, место ${e.seat}`:''}`}</span>${i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
 }
 function tick() {
   const g = state.game; if (!g) return;
@@ -402,8 +410,8 @@ function begin() {
   rememberPlayers();
   state.game=createGame(state.config,levels(),state.seats); resultDetails='payouts';clearUndo();playersVisible=false;reviewBoard=false;rosterQuery='';rosterTable=0; go('board');
 }
-function saveUndo(snapshot = state.game, kind = 'operation') { undo=structuredClone(snapshot);state.undo=undo;state.undoKind=kind; }
-function clearUndo() { undo=null;delete state.undo;delete state.undoKind; }
+function saveUndo(snapshot = state.game, kind = 'operation') { rememberAction(state,snapshot,kind);undo=actionHistory(state).at(-1)?.game||null; }
+function clearUndo() { clearActionHistory(state);undo=null; }
 function showRegistration() {
   const g=state.game;
   if(g.finished || g.players.length>=MAX_PLAYERS) return toast(g.finished?'Игра уже завершена':`В игре уже ${MAX_PLAYERS} игроков`);
@@ -576,7 +584,7 @@ document.addEventListener('input', event=>{
   if(el.hasAttribute('data-number') && !checkNumber(el)) return;
   if(el.id==='roster-query'||el.id==='roster-table') {
     rosterQuery=$('#roster-query').value;rosterTable=Number($('#roster-table').value);
-    $('#roster-list').innerHTML=rosterItems(state.game);$('#roster-count').textContent=`Показано ${filterPlayers(state.game.players,{query:rosterQuery,table:rosterTable}).length} из ${state.game.players.length}`;return;
+    $('#roster-list').innerHTML=rosterItems(state.game);$('#roster-summary').innerHTML=rosterSummary(state.game);return;
   }
   if(el.closest('#settings-form') && el.name) {
     const name=el.name;
@@ -647,6 +655,10 @@ document.addEventListener('click',async event=>{
   if(action==='sound'){state.sound=!state.sound;store();if(state.sound)beep();return render();}
   if(action==='fullscreen'){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{toast('Полноэкранный режим недоступен в этом браузере');}return;}
   if(!g)return;
+  if(action==='roster-eliminated'||action==='roster-all') {
+    rosterTable=action==='roster-eliminated'?-1:0;rosterQuery='';render();
+    $('#roster-table').focus({preventScroll:true});return;
+  }
   if(action==='result-detail'&&g.finished) {
     resultDetails=button.dataset.view==='statistics'?'statistics':'payouts';
     document.querySelectorAll('[data-action="result-detail"]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.view===resultDetails)));
@@ -677,7 +689,7 @@ document.addEventListener('click',async event=>{
   }
   if(action==='finish')return modal('Окончить турнир?',`<p>Таймер остановится и откроется экран итогов.</p><p class="field-hint">В игре ${g.players.filter(p=>p.active).length} участников. Незанятые места и награды за оставшиеся головы не будут назначены автоматически. Завершение можно отменить.</p>`,'Окончить турнир',()=>{const before=structuredClone(g);if(finishGame(g)){saveUndo(before);reviewBoard=false;store();render();}});
   if(action==='next'||action==='prev')return modal(action==='next'?'Следующий уровень?':'Предыдущий уровень?', '<p>Таймер выбранного уровня начнётся с полной длительности.</p>', 'Переключить',()=>{jumpLevel(g,g.index+(action==='next'?1:-1));store();render();});
-  if(action==='undo'){if(undo){state.game=restoreAction(g,undo,Date.now(),state.undoKind);reviewBoard=false;syncGameSetup();clearUndo();store();render();toast('Последнее действие отменено');}return;}
+  if(action==='undo'){if(undoAction(state)){reviewBoard=false;syncGameSetup();undo=actionHistory(state).at(-1)?.game||null;store();render();toast(`Действие отменено${undo?` · ещё доступно: ${state.undoHistory.length}`:''}`,Boolean(undo));}return;}
   const p=g.players.find(p=>p.id===button.dataset.id);if(!p)return;
   if(action==='reentry'&&!p.active&&g.config.reentry) {
     advanceClock(g);

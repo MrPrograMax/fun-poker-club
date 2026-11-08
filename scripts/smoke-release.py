@@ -67,6 +67,9 @@ with open(os.environ['BROWSER_RECORD'], 'a') as record:
                             time.sleep(0.1)
                     with urlopen(url, timeout=3) as response:
                         assert 'Until Morning' in response.read().decode()
+                    for name in ('app.js', 'engine.js', 'styles.css'):
+                        with urlopen(url + '/' + name, timeout=3) as response:
+                            assert response.read() == (Path(__file__).resolve().parent.parent / 'dist' / name).read_bytes(), f'Outdated embedded asset: {name}'
                     while not browser_record.exists() or not browser_record.read_text():
                         if time.monotonic() >= deadline:
                             raise RuntimeError('Browser opener was not called successfully')
@@ -92,7 +95,7 @@ with open(os.environ['BROWSER_RECORD'], 'a') as record:
                     except subprocess.TimeoutExpired:
                         os.killpg(process.pid, signal.SIGKILL)
                         process.wait()
-        print('PASS: launcher without Go, browser opening on the ready server, occupied port, embedded UI, paths with spaces, saved data and restart')
+        print('PASS: launcher without Go, browser opening on the ready server, occupied port, current embedded assets, paths with spaces, saved data and restart')
 
 
 if __name__ == '__main__':

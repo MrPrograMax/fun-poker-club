@@ -334,7 +334,7 @@ input[aria-invalid=true]{border-color:var(--danger)}
 .level-row-actions .mini-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .structure-modal{width:720px}.structure-add-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .player-filters{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:15px;margin:20px 0 10px}
-#roster-count{margin:0 0 16px}.empty-players{grid-column:1/-1;padding:26px 12px;color:var(--muted);font-size:13px;line-height:1.6}
+.roster-summary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:0 0 16px}#roster-count{margin:0}.empty-players{grid-column:1/-1;padding:26px 12px;color:var(--muted);font-size:13px;line-height:1.6}
 .killer-options{display:grid;gap:8px;max-height:42dvh;overflow:auto;margin:18px 0}
 .killer-choice{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:9px;padding:12px;cursor:pointer}
 .killer-choice:has(input:checked){border-color:var(--accent);background:#283522}
