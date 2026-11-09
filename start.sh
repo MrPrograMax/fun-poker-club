@@ -16,7 +16,7 @@ elif [ -f ./go.mod ]; then
   fi
   printf '%s\n' 'Building Until Morning...'
   mkdir -p .local
-  go build -o .local/until-morning .
+  go build -o .local/until-morning ./cmd/until-morning
   APP_BINARY=./.local/until-morning
 else
   printf '%s\n' 'App binary is missing. Extract the entire release archive and try again.'

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import * as E from '../dist/engine.js';
+import * as E from '../web/static/engine.js';
 
 export function randomFor(seed) {
   let n=seed>>>0;

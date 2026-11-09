@@ -1,7 +1,12 @@
 .git
 .openai
-data
 .local
-river-poker
+data
+build
 node_modules
+.env
 .DS_Store
+__pycache__
+until-morning
+until-morning.exe
+river-poker

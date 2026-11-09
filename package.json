@@ -1,14 +1,14 @@
 {
-  "name": "river-poker-room",
+  "name": "until-morning",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "go run .",
-    "start": "go run .",
-    "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/engine.js",
+    "dev": "go run ./cmd/until-morning",
+    "start": "go run ./cmd/until-morning",
+    "test": "node --test web/tests/*.test.mjs",
+    "check": "node --check web/static/app.js && node --check web/static/engine.js",
     "test:monkey": "node scripts/monkey-test.mjs",
-    "test:api-stress": "go build -o .local/until-morning-monkey . && node scripts/stress-api.mjs"
+    "test:api-stress": "go build -o .local/until-morning-monkey ./cmd/until-morning && node scripts/stress-api.mjs"
   }
 }

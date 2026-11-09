@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, MAX_PLAYERS, createGame, makeLevels, registerPlayer, registrationTables, poolOf, bountyPoolOf, payouts, eliminate, addEntry, toggleClock, advanceClock, startFreezeout, restoreAction, normalizeGame } from '../dist/engine.js';
+import { defaults, MAX_PLAYERS, createGame, makeLevels, registerPlayer, registrationTables, poolOf, bountyPoolOf, payouts, eliminate, addEntry, toggleClock, advanceClock, startFreezeout, restoreAction, normalizeGame } from '../static/engine.js';
 
 function game(overrides={}, count=3) {
   const config={...defaults(),seats:count,...overrides};

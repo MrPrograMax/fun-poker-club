@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,createGame,makeLevels,eliminate,addEntry,registerPlayer,registeredPlayer,registrationTables,gameTableNumbers,normalizeGame,rebalanceTables,rememberAction,undoAction,tableViewSeats,poolOf,bountyPoolOf} from '../dist/engine.js';
+import {defaults,createGame,makeLevels,eliminate,addEntry,registerPlayer,registeredPlayer,registrationTables,gameTableNumbers,normalizeGame,rebalanceTables,rememberAction,undoAction,tableViewSeats,poolOf,bountyPoolOf} from '../static/engine.js';
 
 function game() {
   const config={...defaults(),seats:6,tableCapacity:3,bountyMode:'fixed'};

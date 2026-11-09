@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,makeLevels,createGame,eliminate,addEntry,toggleClock,poolOf,bountyPoolOf,extendLevel,actionHistory,rememberAction,undoAction,clearActionHistory,MAX_UNDO_STEPS} from '../dist/engine.js';
+import {defaults,makeLevels,createGame,eliminate,addEntry,toggleClock,poolOf,bountyPoolOf,extendLevel,actionHistory,rememberAction,undoAction,clearActionHistory,MAX_UNDO_STEPS} from '../static/engine.js';
 
 function setup(count=4) {
   const config={...defaults(),seats:count,bountyMode:'fixed'};

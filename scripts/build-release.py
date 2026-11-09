@@ -60,7 +60,7 @@ def main():
             binary = folder / ('until-morning.exe' if goos == 'windows' else 'until-morning')
             env = {**os.environ, 'GOOS': goos, 'GOARCH': goarch, 'CGO_ENABLED': '0'}
             print(f'Building {target}...', flush=True)
-            subprocess.run(['go', 'build', '-trimpath', '-ldflags=-s -w', '-o', str(binary), '.'], cwd=ROOT, env=env, check=True)
+            subprocess.run(['go', 'build', '-trimpath', '-ldflags=-s -w', '-o', str(binary), './cmd/until-morning'], cwd=ROOT, env=env, check=True)
             binary.chmod(0o755)
             launchers = ['start.cmd'] if goos == 'windows' else ['start.sh']
             if goos == 'darwin':

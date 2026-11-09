@@ -25,8 +25,8 @@ jobs:
         run: |
           go test -race ./...
           go vet ./...
-          node --test tests/*.test.mjs
-          node --check dist/app.js
+          npm test
+          npm run check
           sh -n start.sh start.command
       - name: Select archive version
         id: version

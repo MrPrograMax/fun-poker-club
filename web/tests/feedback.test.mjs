@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, makeLevels, createGame, normalizeGame, wholeNumber, validateProfile, validateConfig, validateStructure, seatingDescription, filterPlayers, registerPlayer, toggleClock, advanceClock, jumpLevel, extendLevel, editFutureStructure, moveStructureRow, startFreezeout, setAddonTerms, restoreAction, eliminate, addEntry, finishGame, gameResults, exportGameResults, poolOf, bountyPoolOf } from '../dist/engine.js';
+import { defaults, makeLevels, createGame, normalizeGame, wholeNumber, validateProfile, validateConfig, validateStructure, seatingDescription, filterPlayers, registerPlayer, toggleClock, advanceClock, jumpLevel, extendLevel, editFutureStructure, moveStructureRow, startFreezeout, setAddonTerms, restoreAction, eliminate, addEntry, finishGame, gameResults, exportGameResults, poolOf, bountyPoolOf } from '../static/engine.js';
 const people=[{id:'a',name:'Анна',nick:'Fox22'},{id:'b',name:'Максим',nick:''},{id:'c',name:'Мария',nick:'Ace'}];
 function game(config={}) {const c={...defaults(),seats:3,...config};return createGame(c,makeLevels(c),people,0);}
 function balanced(g){assert.equal(g.players.reduce((n,p)=>n+p.invested,0),poolOf(g)+bountyPoolOf(g));assert.equal(bountyPoolOf(g),g.players.reduce((n,p)=>n+p.bounty+p.earnedBounty,0));}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,createGame,makeLevels,planTableBalance,rebalanceTables,gameTableNumbers,eliminate,addEntry,registerPlayer,registrationTables,normalizeGame,restoreAction,toggleClock,poolOf,bountyPoolOf,filterPlayers} from '../dist/engine.js';
+import {defaults,createGame,makeLevels,planTableBalance,rebalanceTables,gameTableNumbers,eliminate,addEntry,registerPlayer,registrationTables,normalizeGame,restoreAction,toggleClock,poolOf,bountyPoolOf,filterPlayers} from '../static/engine.js';
 
 function game(counts, capacity=10, overrides={}) {
   const config={...defaults(),...overrides,seats:counts.reduce((a,b)=>a+b,0),tableCapacity:capacity};

@@ -69,7 +69,7 @@ with open(os.environ['BROWSER_RECORD'], 'a') as record:
                         assert 'Until Morning' in response.read().decode()
                     for name in ('app.js', 'engine.js', 'styles.css'):
                         with urlopen(url + '/' + name, timeout=3) as response:
-                            assert response.read() == (Path(__file__).resolve().parent.parent / 'dist' / name).read_bytes(), f'Outdated embedded asset: {name}'
+                            assert response.read() == (Path(__file__).resolve().parent.parent / 'web' / 'static' / name).read_bytes(), f'Outdated embedded asset: {name}'
                     while not browser_record.exists() or not browser_record.read_text():
                         if time.monotonic() >= deadline:
                             raise RuntimeError('Browser opener was not called successfully')

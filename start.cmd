@@ -9,7 +9,7 @@ if errorlevel 1 goto no_go
 
 echo Building Until Morning...
 if not exist ".local" mkdir ".local"
-go build -o ".local\until-morning.exe" .
+go build -o ".local\until-morning.exe" ./cmd/until-morning
 if errorlevel 1 goto failed
 set "APP_BINARY=.local\until-morning.exe"
 goto run

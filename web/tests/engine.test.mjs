@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../dist/engine.js';
+import { defaults, seatingPlan, seatPlayers, normalizeGame, makeLevels, recommendStructure, payouts, validateConfig, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, restoreAction, eliminate, addEntry, poolOf, bountyPoolOf, formatTime } from '../static/engine.js';
 
 const players = [{ id:'1', name:'Alex' },{ id:'2',name:'Anna' },{ id:'3',name:'Max' }];
 function game(config={}) { const c={...defaults(),...config};return createGame(c,makeLevels(c),players,0); }
