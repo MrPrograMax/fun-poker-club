@@ -98,7 +98,7 @@ func TestInvalidRequestsDoNotWrite(t *testing.T) {
 		{"trailing JSON", "PUT", fmt.Sprintf(`{"revision":0,"state":%s} {}`, validState), "", 400},
 		{"cross origin", "PUT", fmt.Sprintf(`{"revision":0,"state":%s}`, validState), "https://evil.example", 403},
 		{"method", "POST", "", "", 405},
-		{"too large", "PUT", `{"revision":0,"state":"` + strings.Repeat("a", 1<<20) + `"}`, "", 400},
+		{"too large", "PUT", `{"revision":0,"state":"` + strings.Repeat("a", maxStateBytes) + `"}`, "", 400},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,5 +139,33 @@ func TestCorruptedStoreIsNotSilentlyOverwritten(t *testing.T) {
 	}
 	if _, err := openStore(path); err == nil {
 		t.Fatal("expected corruption error")
+	}
+}
+
+func TestMalformedStateContainersAreRejected(t *testing.T) {
+	for _, field := range []string{"config", "seats", "library", "game"} {
+		for _, value := range []string{"null", "false", "17", `"broken"`, "[]", "{}"} {
+			if (field == "game" && value == "null") || (field == "config" && value == "{}") || ((field == "seats" || field == "library") && value == "[]") {
+				continue
+			}
+			t.Run(field+"_"+value, func(t *testing.T) {
+				s := testStore(t)
+				var state map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(validState), &state); err != nil {
+					t.Fatal(err)
+				}
+				state[field] = json.RawMessage(value)
+				raw, err := json.Marshal(map[string]any{"revision": 0, "state": state})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := request(handler(s), "PUT", "/api/state", string(raw), "").Code; got != 400 {
+					t.Fatalf("invalid %s accepted: %d", field, got)
+				}
+				if s.data.Revision != 0 {
+					t.Fatal("invalid request changed persisted revision")
+				}
+			})
+		}
 	}
 }

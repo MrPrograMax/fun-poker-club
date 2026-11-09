@@ -1,6 +1,6 @@
 import { MAX_PLAYERS, seatingPlan, seatPlayers, defaults, makeLevels, recommendOpeningBlinds, recommendStructure, payouts, validateConfig, poolOf, bountyPoolOf, normalizeGame, addEntry, registerPlayer, registrationTables, playerNameKey, createGame, advanceClock, toggleClock, jumpLevel, startFreezeout, eliminate, formatTime } from './engine.js';
 import { MAX_STRUCTURE_ROWS, wholeNumber, validateProfile, validateStructure, seatingDescription, filterPlayers, extendLevel, editFutureStructure, moveStructureRow, finishGame, gameResults, exportGameResults, setAddonTerms, gameTableNumbers, planTableBalance, rebalanceTables } from './engine.js';
-import { actionHistory, rememberAction, undoAction, clearActionHistory } from './engine.js';
+import { actionHistory, rememberAction, undoAction, clearActionHistory, registeredPlayer, tableViewSeats } from './engine.js';
 
 const KEY = 'river-poker-v1';
 const $ = selector => document.querySelector(selector);
@@ -34,6 +34,7 @@ const icons = {
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
   undo: '<path d="M9 4 4 9l5 5M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  archive: '<path d="M4 4h16v4H4zM5 8v12h14V8M9 12h6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
 };
 const icon = name => `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.plus}</svg>`;
@@ -139,7 +140,7 @@ function brandContent() {
 function header() {
   if (state.step === 'board') return '';
   const current = ['settings', 'seating', 'board'].indexOf(state.step);
-  return `<header class="topbar"><a href="#" class="brand" data-action="home" aria-label="Until Morning — главная">${brandContent()}</a><nav aria-label="Этапы игры">${['Настройки', 'Рассадка', 'Табло'].map((title, i) => `<button class="nav-step ${current === i ? 'selected' : ''}" data-action="nav" data-step="${['settings', 'seating', 'board'][i]}" ${i === 2 && !state.game ? 'disabled' : ''}><span>${i < current ? icon('check') : `0${i + 1}`}</span>${title}</button>`).join('')}</nav><div class="header-actions">${state.game ? `<button class="button subtle small" data-action="new">${icon('plus')} Новая игра</button>` : `<button class="button subtle small" data-action="demo">Посмотреть демо ${icon('arrow')}</button>`}</div></header>`;
+  return `<header class="topbar"><a href="#" class="brand" data-action="home" aria-label="Until Morning — главная">${brandContent()}</a><nav aria-label="Этапы игры">${['Настройки', 'Рассадка', 'Табло'].map((title, i) => `<button class="nav-step ${current === i ? 'selected' : ''}" data-action="nav" data-step="${['settings', 'seating', 'board'][i]}" ${i === 2 && !state.game ? 'disabled' : ''}><span>${i < current ? icon('check') : `0${i + 1}`}</span>${title}</button>`).join('')}</nav><div class="header-actions"><button class="button subtle small" data-action="archives" aria-label="Архив игр">${icon('archive')} Архив игр</button>${state.game ? `<button class="button subtle small" data-action="new">${icon('plus')} Новая игра</button>` : `<button class="button subtle small" data-action="demo">Посмотреть демо ${icon('arrow')}</button>`}</div></header>`;
 }
 function render() {
   const openingResults = state.step === 'board' && state.game?.finished && !reviewBoard && !$('.results-hero');
@@ -191,7 +192,7 @@ function groupedTables(players) {
   }));
 }
 function draftTables() {
-  if (state.game) return groupedTables(state.game.players.map((p, index) => ({ ...p, index })).filter(p => !state.game.seatingManaged || p.active));
+  if (state.game) return gameTableNumbers(state.game).map(number => ({number, players:state.game.players.map((p,index) => ({...p,index})).filter(p => p.table === number && (state.game.config.mode === 'cash' || p.active)).sort((a,b) => a.seat-b.seat)}));
   return groupedTables(seatPlayers(state.seats.map((p, index) => ({ ...p, index })), state.config.tableCapacity));
 }
 function playerInput(p) {
@@ -201,17 +202,22 @@ function playerInput(p) {
 function seatingView() {
   const c = state.config, filled = state.seats.filter(p => p.name.trim() || p.nick?.trim()).length;
   const tables = draftTables(), seatedCount=tables.reduce((sum,t)=>sum+t.players.length,0);
-  return `<div class="page-heading compact"><div><div class="eyebrow">ХОРОШИЕ ЛЮДИ. БОЛЬШИЕ БАНКИ.</div><h1>Кто сегодня за столом<span class="accent">?</span></h1><p>Добавьте имена или выберите знакомых игроков из подсказок.</p></div><span class="pill filled-pill">${state.game?.seatingManaged?`${seatedCount} игроков в игре`:`${filled} / ${c.seats} мест занято`}</span></div><div class="seating-grid">${section('Состав игроков', `${tableLabel(tables.length).toUpperCase()} · ${seatedCount} МЕСТ`, `<form id="seating-form"><fieldset ${state.game ? 'disabled' : ''}><div class="players-editor">${tables.map(t => `<div class="player-table-group"><h3>Стол ${t.number}<span>${t.players.length} игроков</span></h3>${t.players.map(playerInput).join('')}</div>`).join('')}</div><button type="button" class="button subtle shuffle-button" data-action="shuffle">${icon('shuffle')} Случайная рассадка</button></fieldset><p class="field-hint">Укажите имя буквами или только ник — в нём можно использовать цифры. Сохраним игроков для следующей игры. Игроки распределяются между столами равномерно.</p><button class="button primary full" type="submit">${state.game ? 'Вернуться к игре' : 'Всё готово — к игре'} ${icon('arrow')}</button></form>`)}<div class="table-preview"><div id="table-visual">${tableVisual()}</div><p>Места по часовой стрелке · ${tableLabel(tables.length)}</p><div class="seating-details"><div>Стартовый стек<strong>${number(c.stack)}</strong></div><div>Блайнды<strong>${number(c.sb)} / ${number(c.bb)}</strong></div><div>Бай-ин<strong>${money(c.buyin)}</strong></div></div></div></div>`;
+  return `<div class="page-heading compact"><div><div class="eyebrow">ХОРОШИЕ ЛЮДИ. БОЛЬШИЕ БАНКИ.</div><h1>Кто сегодня за столом<span class="accent">?</span></h1><p>Добавьте имена или выберите знакомых игроков из подсказок.</p></div><span class="pill filled-pill">${state.game?`${seatedCount} игроков за столами`:`${filled} / ${c.seats} мест занято`}</span></div><div class="seating-grid">${section('Состав игроков', `${tableLabel(tables.length).toUpperCase()} · ${seatedCount} МЕСТ`, `<form id="seating-form"><fieldset ${state.game ? 'disabled' : ''}><div class="players-editor">${tables.map(t => `<div class="player-table-group"><h3>Стол ${t.number}<span>${t.players.length} игроков</span></h3>${t.players.map(playerInput).join('')}</div>`).join('')}</div><button type="button" class="button subtle shuffle-button" data-action="shuffle">${icon('shuffle')} Случайная рассадка</button></fieldset><p class="field-hint">Укажите имя буквами или только ник — в нём можно использовать цифры. Сохраним игроков для следующей игры. Игроки распределяются между столами равномерно.</p><button class="button primary full" type="submit">${state.game ? 'Вернуться к игре' : 'Всё готово — к игре'} ${icon('arrow')}</button></form>`)}<div class="table-preview"><div id="table-visual">${tableVisual()}</div><p>Места по часовой стрелке · ${tableLabel(tables.length)}</p><div class="seating-details"><div>Стартовый стек<strong>${number(c.stack)}</strong></div><div>Блайнды<strong>${number(c.sb)} / ${number(c.bb)}</strong></div><div>Бай-ин<strong>${money(c.buyin)}</strong></div></div></div></div>`;
 }
 function tableVisual() {
   const tables = draftTables();
   const current = tables.find(t => t.number === selectedTable) || tables[0];
   if (!current) return '';
   selectedTable = current.number;
-  return `${tables.length > 1 ? `<div class="table-tabs" role="group" aria-label="Выбор стола">${tables.map(t => `<button type="button" data-action="select-table" data-table="${t.number}" aria-pressed="${t.number===selectedTable}" class="${t.number===selectedTable?'selected':''}">Стол ${t.number}<small>${t.players.length}</small></button>`).join('')}</div>` : ''}<div class="eyebrow table-caption">СТОЛ № ${String(current.number).padStart(2,'0')} · ${current.players.length} МЕСТ</div><div class="poker-table"><div class="table-felt"><span class="table-brand">UNTIL<br>MORNING</span><small>POKER WITH FRIENDS</small><div class="table-cards"><i>♠</i><i>♣</i><i>♥</i></div></div>${current.players.map((p,i) => { const a = -Math.PI/2 + 2*Math.PI*i/current.players.length; return `<div class="table-seat ${p.name||p.nick ? 'occupied' : ''}" data-seat-number="${p.seat}" style="--x:${50+38*Math.cos(a)}%;--y:${50+40*Math.sin(a)}%"><span>${p.name||p.nick ? escape(initials(p)) : String(p.seat).padStart(2,'0')}</span><small title="${escape(p.name||p.nick?nameOf(p):'Свободно')}">${escape(p.name||p.nick?nameOf(p):'Свободно')}</small></div>`; }).join('')}</div>`;
+  const capacity = (state.game?.config || state.config).tableCapacity;
+  const seats = tableViewSeats(current.players, capacity, state.tableRotations?.[selectedTable]);
+  return `${tables.length > 1 ? `<div class="table-tabs" role="group" aria-label="Выбор стола">${tables.map(t => `<button type="button" data-action="select-table" data-table="${t.number}" aria-pressed="${t.number===selectedTable}" class="${t.number===selectedTable?'selected':''}">Стол ${t.number}<small>${t.players.length}</small></button>`).join('')}</div>` : ''}<div class="eyebrow table-caption">СТОЛ № ${String(current.number).padStart(2,'0')} · ${capacity} МЕСТ</div><div class="poker-table"><div class="table-felt"><span class="table-brand">UNTIL<br>MORNING</span><small>POKER WITH FRIENDS</small><div class="table-cards"><i>♠</i><i>♣</i><i>♥</i></div></div>${seats.map(({seat,player:p,x,y}) => {
+    const occupied = Boolean(p?.name || p?.nick), label = occupied ? nameOf(p) : 'Свободно';
+    return `<div class="table-seat ${occupied?'occupied':''}" data-seat-number="${seat}" style="--x:${x}%;--y:${y}%" aria-label="Место ${seat}: ${escape(label)}"><span>${occupied?escape(initials(p)):String(seat).padStart(2,'0')}${occupied?`<b class="table-seat-badge">${seat}</b>`:''}</span><small title="${escape(label)}">${escape(label)}</small></div>`;
+  }).join('')}</div><div class="table-view-controls" role="group" aria-label="Ракурс стола"><button type="button" class="button subtle icon-button" data-action="rotate-table" data-direction="-1" aria-label="Повернуть ракурс влево" title="Повернуть ракурс влево">${icon('back')}</button><span>Ракурс стола<small>Номера мест сохраняются</small></span><button type="button" class="button subtle icon-button" data-action="rotate-table" data-direction="1" aria-label="Повернуть ракурс вправо" title="Повернуть ракурс вправо">${icon('arrow')}</button></div>`;
 }
 function gameMenu(g) {
-  return `<details class="game-menu"><summary class="button icon-button" aria-label="Меню игры" title="Меню игры">${icon('settings')}</summary><div class="game-menu-content"><span class="eyebrow">ИГРА ПОДГОТОВЛЕНА</span><p>${g.players.length} игроков · ${tableLabel(gameTableNumbers(g).length)}</p><button type="button" data-action="nav" data-step="settings">${icon('check')} Настройки игры</button><button type="button" data-action="nav" data-step="seating">${icon('people')} Рассадка по столам</button><button type="button" data-action="register-player" ${g.finished||g.players.length>=MAX_PLAYERS?'disabled':''}>${icon('plus')} Добавить игрока</button><div class="menu-elapsed">С начала игры <b id="elapsed">${formatTime(g.elapsed/1000,true)}</b></div>${g.config.mode==='tournament'?`<button type="button" data-action="prev" ${g.index===0||g.finished?'disabled':''}>${icon('back')} Предыдущий уровень</button>`:''}<div class="divider"></div><button type="button" data-action="new">${icon('plus')} Новая игра</button></div></details>`;
+  return `<details class="game-menu"><summary class="button icon-button" aria-label="Меню игры" title="Меню игры">${icon('settings')}</summary><div class="game-menu-content"><span class="eyebrow">ИГРА ПОДГОТОВЛЕНА</span><button type="button" data-action="archives">${icon('archive')} Архив игр</button><p>${g.players.length} игроков · ${tableLabel(gameTableNumbers(g).length)}</p><button type="button" data-action="nav" data-step="settings">${icon('check')} Настройки игры</button><button type="button" data-action="nav" data-step="seating">${icon('people')} Рассадка по столам</button><button type="button" data-action="register-player" ${g.finished||g.players.length>=MAX_PLAYERS?'disabled':''}>${icon('plus')} Добавить игрока</button><div class="menu-elapsed">С начала игры <b id="elapsed">${formatTime(g.elapsed/1000,true)}</b></div>${g.config.mode==='tournament'?`<button type="button" data-action="prev" ${g.index===0||g.finished?'disabled':''}>${icon('back')} Предыдущий уровень</button>`:''}<div class="divider"></div><button type="button" data-action="new">${icon('plus')} Новая игра</button></div></details>`;
 }
 function boardActionsMenu(g) {
   return `<details class="board-actions-menu"><summary class="button subtle icon-button" aria-label="Дополнительные действия турнира" title="Дополнительные действия турнира">${icon('more')}</summary><div class="board-actions-content"><span class="eyebrow">УПРАВЛЕНИЕ ТУРНИРОМ</span><button type="button" data-action="extend-level">${icon('clock')} Добавить время</button><button type="button" data-action="structure">${icon('settings')} Структура турнира</button>${g.freezeout?`<button type="button" data-action="freezeout">${icon('chips')} Условия аддона</button>`:''}</div></details>`;
@@ -245,7 +251,7 @@ function resultView(g) {
   const unknown=result.rows.filter(p=>p.total===null).length;
   const totalKnown=result.rows.reduce((sum,p)=>sum+(p.total??p.bountyWon),0);
   const stat=(label,value)=>`<div><span>${label}</span><strong>${value}</strong></div>`;
-  return `<div class="results-heading"><a href="#" class="brand" data-action="home">${brandContent()}</a><span class="pill">ИГРА ЗАВЕРШЕНА</span></div><section class="results-hero"><span class="results-trophy">${icon('trophy')}</span><div class="eyebrow">${escape(g.config.name)}</div><h1>${title}</h1><p>${g.players.length} участников · ${formatTime(g.elapsed/1000,true)} игрового времени${g.finishedAt?` · ${new Date(g.finishedAt).toLocaleDateString('ru-RU')}`:''}</p></section><div class="results-stats">${stat('Всего внесено',money(result.invested))}${stat(cash?'Записано на выходах':'Рассчитано к выплате',money(totalKnown))}${stat(cash?'Всего входов':'Ре-энтри / аддоны',cash?number(g.players.reduce((sum,p)=>sum+p.entries,0)):`${g.players.reduce((sum,p)=>sum+p.reentries,0)} / ${g.players.reduce((sum,p)=>sum+p.addons,0)}`)}</div>${unknown||result.unassignedPrize||result.liveBounties?`<div class="notice result-notice"><strong>Не все результаты определены</strong><p>${unknown?`У ${unknown} игроков ${cash?'не записан выход':'не определено место'}. `:''}Нераспределённый фонд: ${money(result.unassignedPrize)}.${result.liveBounties?` Награды за оставшиеся головы: ${money(result.liveBounties)}.`:''} Они никому не назначены автоматически. ${undo?'Можно отменить завершение и продолжить запись результатов.':''}</p></div>`:''}<section class="panel results-panel"><div class="section-heading"><h2>Результаты игроков</h2><span>ЗА ЭТУ ИГРУ</span></div><div class="result-switch" role="group" aria-label="Данные об игроках"><button type="button" data-action="result-detail" data-view="payouts" aria-controls="result-detail" aria-pressed="${resultDetails==='payouts'}">Выплаты</button><button type="button" data-action="result-detail" data-view="statistics" aria-controls="result-detail" aria-pressed="${resultDetails==='statistics'}">Статистика</button></div><div id="result-detail">${resultDetails==='statistics'?resultStatistics(g,result):resultPayments(g,result)}</div></section><div class="results-actions"><button class="button primary" data-action="new">Новая игра</button><button class="button subtle" data-action="review-board">Вернуться к табло</button><button class="button subtle" data-action="export-results">${icon('download')} Выгрузить результат</button>${undo?`<button class="button subtle result-undo" data-action="undo">${icon('undo')} Отменить последнее действие</button>`:''}</div>${eventView(g)}`;
+  return `<div class="results-heading"><a href="#" class="brand" data-action="home">${brandContent()}</a><span class="pill">ИГРА ЗАВЕРШЕНА</span></div><section class="results-hero"><span class="results-trophy">${icon('trophy')}</span><div class="eyebrow">${escape(g.config.name)}</div><h1>${title}</h1><p>${g.players.length} участников · ${formatTime(g.elapsed/1000,true)} игрового времени${g.finishedAt?` · ${new Date(g.finishedAt).toLocaleDateString('ru-RU')}`:''}</p></section><div class="results-stats">${stat('Всего внесено',money(result.invested))}${stat(cash?'Записано на выходах':'Рассчитано к выплате',money(totalKnown))}${stat(cash?'Всего входов':'Ре-энтри / аддоны',cash?number(g.players.reduce((sum,p)=>sum+p.entries,0)):`${g.players.reduce((sum,p)=>sum+p.reentries,0)} / ${g.players.reduce((sum,p)=>sum+p.addons,0)}`)}</div>${unknown||result.unassignedPrize||result.liveBounties?`<div class="notice result-notice"><strong>Не все результаты определены</strong><p>${unknown?`У ${unknown} игроков ${cash?'не записан выход':'не определено место'}. `:''}Нераспределённый фонд: ${money(result.unassignedPrize)}.${result.liveBounties?` Награды за оставшиеся головы: ${money(result.liveBounties)}.`:''} Они никому не назначены автоматически. ${undo?'Можно отменить завершение и продолжить запись результатов.':''}</p></div>`:''}<section class="panel results-panel"><div class="section-heading"><h2>Результаты игроков</h2><span>ЗА ЭТУ ИГРУ</span></div><div class="result-switch" role="group" aria-label="Данные об игроках"><button type="button" data-action="result-detail" data-view="payouts" aria-controls="result-detail" aria-pressed="${resultDetails==='payouts'}">Выплаты</button><button type="button" data-action="result-detail" data-view="statistics" aria-controls="result-detail" aria-pressed="${resultDetails==='statistics'}">Статистика</button></div><div id="result-detail">${resultDetails==='statistics'?resultStatistics(g,result):resultPayments(g,result)}</div></section><div class="results-actions"><button class="button subtle" data-action="archives">${icon('archive')} Архив игр</button><button class="button primary" data-action="new">Новая игра</button><button class="button subtle" data-action="review-board">Вернуться к табло</button><button class="button subtle" data-action="export-results">${icon('download')} Выгрузить результат</button>${undo?`<button class="button subtle result-undo" data-action="undo">${icon('undo')} Отменить последнее действие</button>`:''}</div>${eventView(g)}`;
 }
 function resultPlayerCell(g,p) {
   const cash=g.config.mode==='cash';
@@ -362,10 +368,10 @@ function rosterView(g) {
   return section('Участники игры',`<span class="roster-tools">${g.config.mode==='tournament'?`<button type="button" class="button small subtle" data-action="manage-tables" ${g.finished?'disabled':''}>${icon('people')} Управление столами</button>`:''}<button type="button" class="button small register-player-button" data-action="register-player" ${g.finished||g.players.length>=MAX_PLAYERS?'disabled':''}>${icon('plus')} Добавить игрока</button>${undo?'<button class="text-button" data-action="undo">Отменить последнее действие</button>':''}</span>`,`${playerFilterBar(g,rosterQuery,rosterTable,'roster')}<div class="roster-summary" id="roster-summary">${rosterSummary(g)}</div><div class="roster" id="roster-list">${rosterItems(g)}</div>${g.config.mode==='tournament'?'<p class="field-hint">Ре-энтри доступен после выбывания. Аддон — в меню «⋯» у активного игрока.</p>':''}`,'roster-panel');
 }
 
-function eventView(g) {
+function eventView(g, readOnly = false) {
   if(!g.events?.length)return '';
   const player=id=>escape(nameOf(g.players.find(p=>p.id===id)||{name:'Игрок'}));
-  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary>${undo?`<p class="field-hint">Доступно отмен: ${state.undoHistory.length}. Отменяйте по очереди, начиная с последнего действия.</p>`:''}<div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='correction'?escape(e.description):e.type==='tables'?`Рассадка обновлена · ${tableLabel(e.tables.length)} · пересадок: ${e.moves.length}${e.closedTables.length?` · закрыты столы: ${e.closedTables.join(', ')}`:''}`:['extend','structure','finish','addon-terms'].includes(e.type)?escape(e.type==='extend'?`Продление ${e.level?'уровня '+e.level:'перерыва'} на ${e.minutes} мин`:e.type==='structure'?`Структура обновлена · ${e.count} уровней`:e.type==='finish'?'Игра завершена':`Условия аддона: ${money(e.addonCost)} за ${number(e.addonStack)} фишек`):e.type==='freezeout'?`Начат фризаут · уровень ${e.level}${e.addonCost!==undefined?` · аддон ${money(e.addonCost)} за ${number(e.addonStack)} фишек`:''}`:e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{registration:'первый вход',rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}${['registration','addon'].includes(e.type)&&e.chips!==undefined?` · +${number(e.chips)} фишек`:''}${e.type==='registration'?` · стол ${e.table}, место ${e.seat}`:''}`}</span>${i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
+  return `<details class="event-log"><summary>История действий <span>${g.events.length}</span></summary>${!readOnly&&undo?`<p class="field-hint">Доступно отмен: ${state.undoHistory.length}. Отменяйте по очереди, начиная с последнего действия.</p>`:''}<div>${g.events.slice().reverse().map((e,i)=>`<div class="event-row"><time>${new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</time><span>${e.type==='correction'?escape(e.description):e.type==='tables'?`Рассадка обновлена · ${tableLabel(e.tables.length)} · пересадок: ${e.moves.length}${e.closedTables.length?` · закрыты столы: ${e.closedTables.join(', ')}`:''}`:['extend','structure','finish','addon-terms'].includes(e.type)?escape(e.type==='extend'?`Продление ${e.level?'уровня '+e.level:'перерыва'} на ${e.minutes} мин`:e.type==='structure'?`Структура обновлена · ${e.count} уровней`:e.type==='finish'?'Игра завершена':`Условия аддона: ${money(e.addonCost)} за ${number(e.addonStack)} фишек`):e.type==='freezeout'?`Начат фризаут · уровень ${e.level}${e.addonCost!==undefined?` · аддон ${money(e.addonCost)} за ${number(e.addonStack)} фишек`:''}`:e.type==='knockout'?`${e.killerId?`${player(e.killerId)} выбил`: 'Выбыл'} ${player(e.playerId)}${e.amount||e.carried?` · ${money(e.amount)} сразу, ${money(e.carried)} на голову`:''}`:`${player(e.playerId)} · ${{registration:'первый вход',rebuy:'докупка (ранее)',reentry:'ре-энтри',addon:'аддон'}[e.type]} ${money(e.amount)}${e.bounty?` (из них ${money(e.bounty)} на голову)`:''}${['registration','addon'].includes(e.type)&&e.chips!==undefined?` · +${number(e.chips)} фишек`:''}${e.type==='registration'?` · стол ${e.table}, место ${e.seat}`:''}`}</span>${!readOnly&&i===0&&undo?'<button type="button" class="text-button event-undo" data-action="undo">Отменить</button>':''}</div>`).join('')}</div></details>`;
 }
 function tick() {
   const g = state.game; if (!g) return;
@@ -385,11 +391,37 @@ function beep() {
 function modal(title, content, button, onConfirm) {
   const dialog = $('#modal');
   if (dialog.open) dialog.close();
-  dialog.classList.remove('structure-modal','planner-modal','registration-modal','knockout-modal','table-management-modal');
+  dialog.classList.remove('structure-modal','planner-modal','registration-modal','knockout-modal','table-management-modal','archive-modal');
   dialog.innerHTML = `<form id="modal-form" novalidate><div class="modal-heading"><h2>${title}</h2><button class="mini-button" type="button" data-action="close" aria-label="Закрыть">×</button></div>${content}<div class="modal-actions"><button type="button" class="button subtle" data-action="close">Отмена</button><button class="button primary" type="submit">${button}</button></div></form>`;
   $('#modal-form').onsubmit = event => { event.preventDefault(); if (!checkForm(event.currentTarget)) return;try { if (onConfirm(new FormData(event.currentTarget)) !== false) dialog.close(); } catch(error) { toast(error.message); } };
   dialog.showModal();
   dialog.scrollTop=0;
+}
+async function showArchives() {
+  modal('Архив игр','<p class="field-hint">Загружаю сохранённые игры…</p>','Закрыть',()=>{});
+  const form=$('#modal-form');$('#modal').classList.add('archive-modal');
+  try {
+    const response=await fetch('/api/archives',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+    if(!response.ok)throw new Error('Архив доступен при запуске актуальной версии Go-сервера.');
+    const {games}=await response.json();
+    if($('#modal-form')!==form||!$('#modal').open)return;
+    const date=value=>new Date(value).toLocaleString('ru-RU',{dateStyle:'medium',timeStyle:'short'});
+    modal('Архив игр',`<p class="field-hint">Завершённые игры сохраняются автоматически. При создании новой игры предыдущая тоже останется здесь. Просмотр архива не меняет текущую игру.</p><div class="archive-list">${games.length?games.map(g=>`<button type="button" class="archive-item" data-archive-id="${escape(g.id)}"><span class="archive-item-icon">${icon(g.finished?'trophy':'archive')}</span><span><strong>${escape(g.name||'Покер с друзьями')}</strong><small>${date(g.startedAt||g.savedAt)} · ${g.mode==='cash'?'Кэш':'Турнир'} · ${g.playerCount} участников · ${formatTime(g.elapsed/1000,true)}</small></span><span class="archive-state">${g.finished?'Завершена':'Не завершена'} ${icon('arrow')}</span></button>`).join(''):'<p class="empty-players">Пока здесь нет игр. После завершения первая игра появится автоматически.</p>'}</div>`,'Закрыть',()=>{});
+    $('#modal').classList.add('archive-modal');
+    document.querySelectorAll('[data-archive-id]').forEach(button=>button.addEventListener('click',()=>showArchivedGame(button.dataset.archiveId)));
+  } catch(error){if($('#modal-form')===form){form.querySelector('.field-hint').textContent=error.message;}}
+}
+async function showArchivedGame(id) {
+  const form=$('#modal-form');
+  try {
+    const response=await fetch(`/api/archives/${encodeURIComponent(id)}`,{cache:'no-store',signal:AbortSignal.timeout(5000)});
+    if(!response.ok)throw new Error('Не удалось открыть сохранённую игру');
+    const entry=await response.json();
+    if($('#modal-form')!==form||!$('#modal').open)return;
+    const g=normalizeGame(structuredClone(entry.game)),result=gameResults(g);
+    modal(escape(g.config.name||'Сохранённая игра'),`<div class="archive-detail-heading"><button type="button" class="text-button" id="archive-back">${icon('back')} Все игры</button><span class="pill">АРХИВ · ТОЛЬКО ПРОСМОТР</span></div><p class="field-hint">${g.finished?'Игра завершена':'Снимок незавершённой игры'} · ${g.players.length} участников · ${formatTime(g.elapsed/1000,true)}</p><h3 class="archive-section-title">Выплаты</h3>${resultPayments(g,result)}<details class="archive-section"><summary>Статистика игроков</summary>${resultStatistics(g,result)}</details><details class="archive-section"><summary>Структура и условия игры</summary><p class="field-hint">Вход ${money(g.config.buyin)} · стек ${number(g.config.stack)} · баунти: ${{off:'без баунти',fixed:'фиксированное',progressive:'прогрессивное'}[g.config.bountyMode]}${g.config.bountyMode!=='off'?` · базовая голова ${money(g.config.bountyAmount)}`:''}</p><div class="results-table-wrap"><table class="results-table"><thead><tr><th>Уровень</th><th>МБ / ББ</th><th>Минуты</th></tr></thead><tbody>${g.levels.map(l=>`<tr><td>${l.kind==='break'?'Перерыв':l.number}</td><td>${l.kind==='break'?'—':`${number(l.sb)} / ${number(l.bb)}`}</td><td>${number(l.duration/60)}</td></tr>`).join('')}</tbody></table></div></details>${eventView(g,true)}`,'Закрыть',()=>{});
+    $('#modal').classList.add('archive-modal');$('#archive-back').addEventListener('click',showArchives);
+  } catch(error){toast(error.message);}
 }
 function rememberPlayer(p) {
   const existing=state.library.find(x=>playerNameKey(x.name||x.nick)===playerNameKey(p.name||p.nick));
@@ -412,27 +444,49 @@ function begin() {
 }
 function saveUndo(snapshot = state.game, kind = 'operation') { rememberAction(state,snapshot,kind);undo=actionHistory(state).at(-1)?.game||null; }
 function clearUndo() { clearActionHistory(state);undo=null; }
+function reenterPlayer(g,p) {
+  advanceClock(g);
+  const apply=()=>{
+    const before=structuredClone(g);
+    addEntry(g,p.id,'reentry');saveUndo(before);reviewBoard=false;
+    rosterTable=p.table;selectedTable=p.table;rosterQuery='';playersVisible=true;
+    store();render();toast(`${nameOf(p)} · ре-энтри +${money(g.config.buyin)} · стол ${p.table}, место ${p.seat}`,true);
+  };
+  if(g.freezeout)return modal('Ре-энтри после фризаута?',`<p>Фризаут уже начат. Разрешить ре-энтри игроку <strong>${escape(nameOf(p))}</strong> за ${money(g.config.buyin)}?</p><p class="field-hint">Решение за ведущим. Приложение не отсчитывает дополнительные раздачи и не блокирует вход.</p>`,'Разрешить ре-энтри',apply);
+  try {apply();} catch(error){toast(error.message);}
+}
 function showRegistration() {
   const g=state.game;
   if(g.finished || g.players.length>=MAX_PLAYERS) return toast(g.finished?'Игра уже завершена':`В игре уже ${MAX_PLAYERS} игроков`);
   const c=g.config, tables=registrationTables(g), cash=c.mode==='cash';
   const suggested=tables.filter(t=>t.seats.length&&!t.isNew).sort((a,b)=>b.seats.length-a.seats.length||a.table-b.table)[0]||tables.at(-1);
   const bounty=cash||c.bountyMode==='off'?0:c.bountyAmount;
-  const candidates=state.library.filter(p=>!g.players.some(x=>x.id===p.id||playerNameKey(x.name||x.nick)===playerNameKey(p.name||p.nick)));
-  modal('Добавить игрока', `<p>${cash?'Новый участник кэш-игры.':'Поздняя регистрация · первый вход в турнир.'} Укажите имя буквами или только ник; цифры допустимы в нике.</p><div class="name-field spaced">${input('Имя и фамилия','lateName','','','id="late-name" autocomplete="off" maxlength="60"')}<div id="late-suggestions" class="registration-suggestions" hidden></div></div><div class="spaced">${input('Ник · можно вместо имени','lateNick','','','maxlength="24" autocomplete="off"')}</div><div class="registration-placement spaced"><div class="registration-placement-heading"><span id="registration-placement-status" class="placement-status automatic" role="status"><span aria-hidden="true">✓</span> <span id="placement-mode-label">Выбрано автоматически</span></span><button type="button" id="reset-placement" class="text-button" hidden>Подобрать автоматически</button></div><div class="fields two"><label class="field"><span>Стол</span><select name="registrationTable" aria-describedby="registration-placement-status">${tables.map(t=>`<option value="${t.table}" ${t.table===suggested.table?'selected':''} ${!t.seats.length?'disabled':''}>${t.isNew?'Новый стол':'Стол'} ${t.table}${!t.seats.length?' · занят':''}</option>`).join('')}</select></label><label class="field"><span>Место</span><select name="registrationSeat" aria-describedby="registration-placement-status"></select></label></div></div><p class="field-hint">${g.seatingManaged?'После объединения заняты только места активных игроков.':'Места зарегистрированных игроков сохраняются для ре-энтри.'} Можно выбрать свободное место или открыть новый стол.</p><div class="registration-terms"><div><span>Первый взнос</span><strong>${money(c.buyin)}</strong></div><div><span>Стартовый стек</span><strong>${number(c.stack)}</strong></div>${bounty?`<div><span>За голову</span><strong>${money(bounty)}</strong></div>`:''}</div><p class="field-hint">${cash?'В банк игры': 'В призовой фонд'} поступит ${money(c.buyin-bounty)}.${g.freezeout?' Фризаут уже начат — вход по вашей договорённости.':''}</p><p id="registration-error" class="field-hint error" role="alert" hidden></p>`, 'Добавить игрока', data=>{
+  const candidates=[...g.players, ...state.library.filter(p=>!registeredPlayer(g,p))];
+  modal('Добавить игрока', `<p>${cash?'Новый участник кэш-игры.':'Поздняя регистрация · первый вход в турнир.'} Укажите имя буквами или только ник; цифры допустимы в нике.</p><div class="name-field spaced">${input('Имя и фамилия','lateName','','','id="late-name" autocomplete="off" maxlength="60"')}<div id="late-suggestions" class="registration-suggestions" hidden></div></div><div class="spaced">${input('Ник · можно вместо имени','lateNick','','','maxlength="24" autocomplete="off"')}</div><div id="registered-player" class="registered-player" hidden></div><div class="registration-placement spaced"><div class="registration-placement-heading"><span id="registration-placement-status" class="placement-status automatic" role="status"><span aria-hidden="true">✓</span> <span id="placement-mode-label">Выбрано автоматически</span></span><button type="button" id="reset-placement" class="text-button" hidden>Подобрать автоматически</button></div><div class="fields two"><label class="field"><span>Стол</span><select name="registrationTable" aria-describedby="registration-placement-status">${tables.map(t=>`<option value="${t.table}" ${t.table===suggested.table?'selected':''} ${!t.seats.length?'disabled':''}>${t.isNew?'Новый стол':'Стол'} ${t.table}${!t.seats.length?' · занят':''}</option>`).join('')}</select></label><label class="field"><span>Место</span><select name="registrationSeat" aria-describedby="registration-placement-status"></select></label></div></div><p class="field-hint">${cash?'':'Выбывший освобождает место, а его история остаётся в турнире.'} Можно выбрать свободное место или открыть новый стол.</p><div class="registration-terms"><div><span>Первый взнос</span><strong>${money(c.buyin)}</strong></div><div><span>Стартовый стек</span><strong>${number(c.stack)}</strong></div>${bounty?`<div><span>За голову</span><strong>${money(bounty)}</strong></div>`:''}</div><p class="field-hint">${cash?'В банк игры': 'В призовой фонд'} поступит ${money(c.buyin-bounty)}.${g.freezeout?' Фризаут уже начат — вход по вашей договорённости.':''}</p><p id="registration-error" class="field-hint error" role="alert" hidden></p>`, 'Добавить игрока', data=>{
     const name=String(data.get('lateName')).trim();
     const known=state.library.find(p=>playerNameKey(p.name||p.nick)===playerNameKey(name||String(data.get('lateNick')).trim()));
     const profile={id:known?.id||uid(),name,nick:String(data.get('lateNick')).trim()};
+    if(registeredPlayer(g,profile)){updateExisting();return false;}
     const previous=structuredClone(g);
     let player;
     try { player=registerPlayer(g,profile,{table:Number(data.get('registrationTable')),seat:Number(data.get('registrationSeat'))}); }
     catch(error) { $('#registration-error').textContent=error.message;$('#registration-error').hidden=false;return false; }
     saveUndo(previous);
-    rememberPlayer(player);syncGameSetup();selectedTable=player.table;if(g.seatingManaged)rosterTable=player.table;playersVisible=true;
+    rememberPlayer(player);syncGameSetup();selectedTable=player.table;rosterTable=player.table;rosterQuery='';playersVisible=true;
     store();render();toast(`${nameOf(player)} · первый вход +${money(player.invested)}`,true);
   });
   $('#modal').classList.add('registration-modal');
   const form=$('#modal-form'), nameInput=form.elements.lateName, suggestions=$('#late-suggestions');
+  const matchingPlayer=()=>registeredPlayer(g,{name:nameInput.value,nick:form.elements.lateNick.value});
+  const updateExisting=()=>{
+    const player=matchingPlayer(), banner=$('#registered-player');
+    banner.hidden=!player;
+    form.querySelector('[type="submit"]').disabled=Boolean(player);
+    if(!player){banner.innerHTML='';return;}
+    const returning=!cash&&!player.active&&c.reentry;
+    banner.innerHTML=`<strong>${escape(nameOf(player))} уже зарегистрирован</strong><p>${player.active?`Играет за столом ${player.table}, место ${player.seat}.`:returning?'Можно вернуться через ре-энтри. Взносы и статистика сохранятся, свободное место подберём автоматически.':'Участник уже зарегистрирован. Его история сохранена в карточке.'}</p>${returning?`<button type="button" class="button small" id="registration-reentry">${icon('plus')} Ре-энтри · ${money(c.buyin)}</button>`:''}`;
+    $('#registration-reentry')?.addEventListener('click',()=>{$('#modal').close();reenterPlayer(g,player);});
+  };
   const updateSeats=()=>{
     const table=tables.find(t=>t.table===Number(form.elements.registrationTable.value));
     form.elements.registrationSeat.innerHTML=table.seats.map(seat=>`<option value="${seat}">${seat}</option>`).join('');
@@ -440,7 +494,7 @@ function showRegistration() {
   const showSuggestions=()=>{
     const query=playerNameKey(nameInput.value);
     const matches=candidates.filter(p=>!query||playerNameKey(`${p.name} ${p.nick||''}`).includes(query)).slice(0,5);
-    suggestions.innerHTML=matches.map(p=>`<button type="button" data-registration-suggestion="${escape(p.id)}"><strong>${escape(p.name)}</strong>${p.nick?`<small>${escape(p.nick)}</small>`:''}</button>`).join('');
+    suggestions.innerHTML=matches.map(p=>`<button type="button" data-registration-suggestion="${escape(p.id)}"><strong>${escape(p.name||p.nick)}</strong><small>${registeredPlayer(g,p)?p.active?'Уже играет':'Уже зарегистрирован · выбыл':p.nick?escape(p.nick):'Из вашей компании'}</small></button>`).join('');
     suggestions.hidden=!matches.length;
   };
   updateSeats();
@@ -448,6 +502,7 @@ function showRegistration() {
   form.addEventListener('input',event=>{
     $('#registration-error').hidden=true;
     if(event.target===nameInput) showSuggestions();
+    updateExisting();
   });
   const setPlacementMode=automatic=>{
     $('#placement-mode-label').textContent=automatic?'Выбрано автоматически':'Выбрано вручную';
@@ -465,7 +520,7 @@ function showRegistration() {
     const player=candidates.find(p=>p.id===button?.dataset.registrationSuggestion);
     if(!player)return;
     nameInput.value=player.name;form.elements.lateNick.value=player.nick||'';
-    suggestions.hidden=true;$('#registration-error').hidden=true;
+    suggestions.hidden=true;$('#registration-error').hidden=true;updateExisting();
   });
   nameInput.focus();showSuggestions();
 }
@@ -641,6 +696,7 @@ document.addEventListener('click',async event=>{
   const action=button.dataset.action,g=state.game;
   if(!g&&['structure','structure-planner','nav'].includes(action)&&!checkForm($('#settings-form')))return;
   if(action==='close')return $('#modal').close();
+  if(action==='archives')return showArchives();
   if(action==='home'){event.preventDefault();return go(g?'board':'settings');}
   if(action==='nav'){if(button.dataset.step==='seating'&&!g){const error=setupError();if(error)return toast(error);}return go(button.dataset.step);}
   if(action==='mode'){state.config.mode=button.dataset.mode;try{syncOpeningBlinds();}catch{/* Keep incomplete settings editable. */}store();return render();}
@@ -648,10 +704,11 @@ document.addEventListener('click',async event=>{
   if(action==='structure')return showStructure();
   if(action==='players'){playersVisible=!playersVisible;render();if(playersVisible)$('#players-panel').scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(action==='select-table'){selectedTable=Number(button.dataset.table);$('#table-visual').innerHTML=tableVisual();return;}
+  if(action==='rotate-table'){const capacity=(g?.config||state.config).tableCapacity;state.tableRotations||={};state.tableRotations[selectedTable]=((state.tableRotations[selectedTable]||0)+Number(button.dataset.direction)+capacity)%capacity;store();$('#table-visual').innerHTML=tableVisual();document.querySelector(`[data-action="rotate-table"][data-direction="${button.dataset.direction}"]`).focus({preventScroll:true});return;}
   if(action==='shuffle'){for(let i=state.seats.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[state.seats[i],state.seats[j]]=[state.seats[j],state.seats[i]];}store();return render();}
   if(action==='suggest'){const p=state.library.find(p=>p.id===button.dataset.id);state.seats[Number(button.dataset.seat)]={...p};store();return render();}
-  if(action==='demo'){state.config=defaults();state.seats=['Александр','Михаил','Анна','Дмитрий','Мария','Артём'].map((name,i)=>({id:uid(),name,nick:['Alex','Misha','Anna','Dima','Mary','Art'][i]}));delete state.levels;delete state.autoStructure;state.game=createGame(state.config,levels(),state.seats);state.game.remaining=17*60+42;clearUndo();reviewBoard=false;rosterQuery='';rosterTable=0;return go('board');}
-  if(action==='new')return modal('Новая игра', '<p>Текущая игра будет заменена. Сохранённые имена останутся в вашей компании.</p>', 'Создать игру', ()=>{state.game=null;resultDetails='payouts';clearUndo();playersVisible=false;reviewBoard=false;rosterQuery='';rosterTable=0;delete state.levels;delete state.autoStructure;go('settings');});
+  if(action==='demo'){state.tableRotations={};state.config=defaults();state.seats=['Александр','Михаил','Анна','Дмитрий','Мария','Артём'].map((name,i)=>({id:uid(),name,nick:['Alex','Misha','Anna','Dima','Mary','Art'][i]}));delete state.levels;delete state.autoStructure;state.game=createGame(state.config,levels(),state.seats);state.game.remaining=17*60+42;clearUndo();reviewBoard=false;rosterQuery='';rosterTable=0;return go('board');}
+  if(action==='new')return modal('Новая игра', '<p>Текущая игра сохранится в архиве. Сохранённые имена останутся в вашей компании.</p>', 'Создать игру', ()=>{state.tableRotations={};state.game=null;resultDetails='payouts';clearUndo();playersVisible=false;reviewBoard=false;rosterQuery='';rosterTable=0;delete state.levels;delete state.autoStructure;go('settings');});
   if(action==='sound'){state.sound=!state.sound;store();if(state.sound)beep();return render();}
   if(action==='fullscreen'){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{toast('Полноэкранный режим недоступен в этом браузере');}return;}
   if(!g)return;
@@ -691,12 +748,7 @@ document.addEventListener('click',async event=>{
   if(action==='next'||action==='prev')return modal(action==='next'?'Следующий уровень?':'Предыдущий уровень?', '<p>Таймер выбранного уровня начнётся с полной длительности.</p>', 'Переключить',()=>{jumpLevel(g,g.index+(action==='next'?1:-1));store();render();});
   if(action==='undo'){if(undoAction(state)){reviewBoard=false;syncGameSetup();undo=actionHistory(state).at(-1)?.game||null;store();render();toast(`Действие отменено${undo?` · ещё доступно: ${state.undoHistory.length}`:''}`,Boolean(undo));}return;}
   const p=g.players.find(p=>p.id===button.dataset.id);if(!p)return;
-  if(action==='reentry'&&!p.active&&g.config.reentry) {
-    advanceClock(g);
-    const apply=()=>{const before=structuredClone(g);addEntry(g,p.id,'reentry');saveUndo(before);reviewBoard=false;if(g.seatingManaged){rosterTable=p.table;selectedTable=p.table;}store();render();toast(`${nameOf(p)} · ре-энтри +${money(g.config.buyin)}${g.seatingManaged?` · стол ${p.table}, место ${p.seat}`:''}`,true);};
-    if(g.freezeout)return modal('Ре-энтри после фризаута?',`<p>Фризаут уже начат. Разрешить ре-энтри игроку <strong>${escape(nameOf(p))}</strong> за ${money(g.config.buyin)}?</p><p class="field-hint">Решение за ведущим. Приложение не отсчитывает дополнительные раздачи и не блокирует вход.</p>`,'Разрешить ре-энтри',apply);
-    try {apply();} catch(error){toast(error.message);}return;
-  }
+  if(action==='reentry'&&!p.active&&g.config.reentry) return reenterPlayer(g,p);
   if(!p.active||g.finished)return;
   if(action==='bust'&&g.config.bountyMode==='off') { saveUndo();eliminate(g,p.id);store();render();toast(`${nameOf(p)} · выбыл`,true);return; }
   if(action==='bust')return showKnockout(g,p);

@@ -404,3 +404,35 @@ input[aria-invalid=true]{border-color:var(--danger)}
   .result-switch{display:flex}.result-switch button{flex:1;padding:10px 12px}
   .result-highlight{padding:15px 12px;gap:10px}.result-highlight strong{font-size:14px}.result-highlight>b{font-size:24px}
 }
+
+/* Table orientation affects the preview only; badges keep actual seat numbers visible. */
+.table-seat>span{position:relative}
+.table-seat-badge{position:absolute;right:-3px;bottom:-2px;display:grid;place-items:center;min-width:18px;height:18px;padding:0 3px;border-radius:50%;border:2px solid #172113;background:#26351f;color:var(--accent);font-size:9px;line-height:1}
+.table-view-controls{display:flex;align-items:center;justify-content:center;gap:18px;margin:18px 0 8px}
+.table-view-controls>span{text-align:center;font-size:12px;color:var(--text)}
+.table-view-controls small{display:block;margin-top:5px;color:var(--muted);font-size:10px}
+.table-view-controls .button{width:42px;height:42px;flex-shrink:0}
+.registered-player:not([hidden]){display:grid;gap:10px;background:#222f1b;border:1px solid #4b623b;border-radius:10px;padding:16px;margin-top:20px}
+.registered-player strong{font-size:14px}
+.registered-player p{font-size:12px;line-height:1.6;color:var(--muted)}
+.registered-player .button{justify-self:start;border-color:#748c5c;color:var(--accent)}
+.registration-modal:has(.registered-player:not([hidden])) .registration-placement,
+.registration-modal:has(.registered-player:not([hidden])) .registration-placement~.field-hint,
+.registration-modal:has(.registered-player:not([hidden])) .registration-terms{display:none}
+
+.header-actions{gap:10px}
+dialog.archive-modal{max-width:1000px;width:calc(100vw - 32px)}
+.archive-list{display:grid;gap:10px;margin-top:24px}
+.archive-item{display:flex;align-items:center;gap:16px;text-align:left;border:1px solid var(--border);border-radius:12px;padding:20px;background:#172014;width:100%}
+.archive-item:hover{border-color:#8ca671;background:#23301c}
+.archive-item-icon{color:var(--accent)}
+.archive-item strong{display:block;font-size:15px;margin-bottom:8px}
+.archive-item small{color:var(--muted);font-size:11px;line-height:1.7}
+.archive-state{display:flex;align-items:center;gap:12px;margin-left:auto;white-space:nowrap;font-size:11px;color:var(--accent)}
+.archive-detail-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px}
+.archive-section-title{font-size:16px;margin:24px 0 14px}
+.archive-section{border-top:1px solid var(--border);margin-top:22px;padding-top:18px}
+.archive-section>summary{cursor:pointer;font-size:14px;margin-bottom:16px}
+.archive-modal .event-log{margin-top:22px}
+.archive-modal .modal-actions>[data-action="close"]{display:none}
+@media(max-width:620px){.archive-item{flex-wrap:wrap;gap:12px;padding:16px}.archive-state{width:100%;padding-left:31px}.archive-detail-heading{flex-wrap:wrap}.header-actions .button.small{padding:9px}}

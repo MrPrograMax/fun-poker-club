@@ -7,6 +7,8 @@
     "dev": "go run .",
     "start": "go run .",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/engine.js"
+    "check": "node --check dist/app.js && node --check dist/engine.js",
+    "test:monkey": "node scripts/monkey-test.mjs",
+    "test:api-stress": "go build -o .local/until-morning-monkey . && node scripts/stress-api.mjs"
   }
 }

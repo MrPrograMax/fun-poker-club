@@ -24,7 +24,7 @@ for(const mode of ['off','fixed','progressive']) test(`late first entry applies 
   assert.equal(g.players[2].place,4);assert.equal(g.config.seats,4);
   assert.deepEqual(g.players.slice(0,3).map(p=>({id:p.id,earned:p.earnedBounty,bounty:p.bounty,table:p.table,seat:p.seat})),existing);
   assert.equal(payouts(poolOf(g),g.config.prizes).reduce((sum,n)=>sum+n,0),poolOf(g));
-  assert.deepEqual(g.events.at(-1),{type:'registration',playerId:'late',amount:1000,bounty:reward,chips:10000,table:1,seat:4,at:200});
+  assert.deepEqual(g.events.at(-1),{type:'registration',playerId:'late',amount:1000,bounty:reward,chips:10000,table:1,seat:3,at:200});
   balanced(g);
 });
 
@@ -61,14 +61,20 @@ test('newcomer gets the least occupied existing table without reseating anyone',
   assert.deepEqual([another.table,another.seat],[1,10]);
 });
 
-test('full tables create one more table and eliminated seats stay reserved for reentry',()=>{
-  const g=game({tableCapacity:2},4);eliminate(g,'1',1);
-  assert.equal(registrationTables(g).filter(t=>!t.isNew).flatMap(t=>t.seats).length,0);
-  const before=structuredClone(g);
-  assert.throws(()=>registerPlayer(g,newcomer(),{table:1,seat:1},2),/свободное место/);assert.deepEqual(g,before);
-  const p=registerPlayer(g,newcomer(),null,3);assert.deepEqual([p.table,p.seat],[3,1]);
-  addEntry(g,'1','reentry',4);assert.deepEqual([g.players[0].table,g.players[0].seat],[1,1]);
+test('a newcomer can take a vacated seat and the returning participant gets a new table when full',()=>{
+  const g=game({tableCapacity:2,bountyMode:'fixed'},4), returning=g.players[0];
+  eliminate(g,'1',1,'2');
+  assert.deepEqual([returning.table,returning.seat,returning.lastTable,returning.lastSeat],[null,null,1,1]);
+  assert.deepEqual(registrationTables(g).find(t=>t.table===1).seats,[1]);
+  const p=registerPlayer(g,newcomer(),{table:1,seat:1},2);
+  assert.deepEqual([p.table,p.seat],[1,1]);
+  addEntry(g,'1','reentry',3);
+  assert.deepEqual([returning.table,returning.seat],[3,1]);
+  assert.equal(g.players.filter(p=>p.id==='1').length,1);
+  assert.equal(returning.entries,2);assert.equal(returning.reentries,1);
+  assert.equal(returning.invested,2000);assert.equal(returning.bounty,200);
   assert.equal(new Set(g.players.map(p=>`${p.table}:${p.seat}`)).size,g.players.length);
+  balanced(g);
 });
 
 test('invalid or duplicate registrations do not change game, history or clock',()=>{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -49,15 +50,11 @@ func openStore(path string) (*store, error) {
 }
 
 // Persist before publishing the new revision to readers.
-func (s *store) write(next snapshot) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+func writeAtomic(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(s.path), ".state-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".state-*")
 	if err != nil {
 		return err
 	}
@@ -72,7 +69,14 @@ func (s *store) write(next snapshot) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := os.Rename(f.Name(), s.path); err != nil {
+	return os.Rename(f.Name(), path)
+}
+func (s *store) write(next snapshot) error {
+	b, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	if err := writeAtomic(s.path, b); err != nil {
 		return err
 	}
 	s.data = next
@@ -84,6 +88,58 @@ func respond(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+func objectJSON(raw json.RawMessage) bool {
+	var value map[string]json.RawMessage
+	return json.Unmarshal(raw, &value) == nil && value != nil
+}
+
+func objectArrayJSON(raw json.RawMessage) bool {
+	var values []json.RawMessage
+	if json.Unmarshal(raw, &values) != nil || values == nil {
+		return false
+	}
+	for _, value := range values {
+		if !objectJSON(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func validGameJSON(raw json.RawMessage) bool {
+	var game struct {
+		Config  json.RawMessage   `json:"config"`
+		Players json.RawMessage   `json:"players"`
+		Levels  []json.RawMessage `json:"levels"`
+		Index   *int              `json:"index"`
+	}
+	if json.Unmarshal(raw, &game) != nil || !objectJSON(game.Config) || !objectArrayJSON(game.Players) || game.Index == nil || *game.Index < 0 || *game.Index >= len(game.Levels) {
+		return false
+	}
+	for _, level := range game.Levels {
+		if !objectJSON(level) {
+			return false
+		}
+	}
+	return true
+}
+
+func validStateJSON(raw json.RawMessage) bool {
+	var state struct {
+		Version int             `json:"version"`
+		Config  json.RawMessage `json:"config"`
+		Seats   json.RawMessage `json:"seats"`
+		Library json.RawMessage `json:"library"`
+		Game    json.RawMessage `json:"game"`
+		Step    string          `json:"step"`
+	}
+	if json.Unmarshal(raw, &state) != nil || state.Version != 1 || !objectJSON(state.Config) || !objectArrayJSON(state.Seats) || !objectArrayJSON(state.Library) || (state.Step != "settings" && state.Step != "seating" && state.Step != "board") {
+		return false
+	}
+	// Setup drafts may omit the game; an existing game needs its actual containers.
+	return len(state.Game) == 0 || bytes.Equal(bytes.TrimSpace(state.Game), []byte("null")) || validGameJSON(state.Game)
 }
 
 func (s *store) api(w http.ResponseWriter, r *http.Request) {
@@ -109,11 +165,11 @@ func (s *store) api(w http.ResponseWriter, r *http.Request) {
 			respond(w, http.StatusUnsupportedMediaType, map[string]string{"error": "Expected application/json"})
 			return
 		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStateBytes))
 		decoder.DisallowUnknownFields()
 		var next snapshot
 		if err := decoder.Decode(&next); err != nil {
-			respond(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body (maximum 1 MiB)"})
+			respond(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body (maximum 8 MiB)"})
 			return
 		}
 		var extra any
@@ -121,19 +177,17 @@ func (s *store) api(w http.ResponseWriter, r *http.Request) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "Expected one JSON object"})
 			return
 		}
-		var state struct {
-			Version int             `json:"version"`
-			Config  json.RawMessage `json:"config"`
-			Seats   json.RawMessage `json:"seats"`
-			Library json.RawMessage `json:"library"`
-			Step    string          `json:"step"`
-		}
-		if json.Unmarshal(next.State, &state) != nil || state.Version != 1 || len(state.Config) == 0 || len(state.Seats) == 0 || len(state.Library) == 0 || (state.Step != "settings" && state.Step != "seating" && state.Step != "board") {
+		if !validStateJSON(next.State) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "Invalid game state"})
 			return
 		}
 		if next.Revision != s.data.Revision {
 			respond(w, http.StatusConflict, map[string]any{"error": "State changed in another client", "revision": s.data.Revision})
+			return
+		}
+		if err := s.archiveTransition(next.State); err != nil {
+			log.Printf("archive game: %v", err)
+			respond(w, http.StatusInternalServerError, map[string]string{"error": "Could not archive game; current game was kept"})
 			return
 		}
 		next.Revision++
@@ -153,6 +207,8 @@ func handler(s *store) http.Handler {
 	assets, _ := fs.Sub(web, "dist")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/state", s.api)
+	mux.HandleFunc("GET /api/archives", s.archives)
+	mux.HandleFunc("GET /api/archives/{id}", s.archives)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusOK, map[string]string{"status": "ok", "service": "river-poker", "storage": "file"})
 	})

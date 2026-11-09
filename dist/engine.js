@@ -71,8 +71,21 @@ export function seatPlayers(players, tableCapacity = 10) {
     })));
 }
 
+export function tableViewSeats(players, capacity, rotation = 0) {
+  const offset = Number.isInteger(rotation) ? ((rotation % capacity) + capacity) % capacity : 0;
+  return Array.from({length:capacity}, (_,i) => {
+    const seat = i + 1, angle = -Math.PI/2 + 2*Math.PI*((i+offset)%capacity)/capacity;
+    return {seat, player:players.find(p => p.seat === seat) ?? null, x:50+38*Math.cos(angle), y:50+40*Math.sin(angle)};
+  });
+}
+
 export function gameTableNumbers(game) {
-  return [...new Set(game.players.filter(p => (!game.seatingManaged || p.active) && p.table > 0).map(p => p.table))].sort((a,b) => a-b);
+  // Empty tables stay open until the host applies a new seating plan.
+  const existing = game.openTables ?? game.players
+    .filter(p => !game.seatingManaged || p.active)
+    .map(p => p.table ?? p.lastTable);
+  return [...new Set([...existing, ...game.players.filter(p => p.active).map(p => p.table)])]
+    .filter(n => Number.isInteger(n) && n > 0).sort((a,b) => a-b);
 }
 
 function vacateSeat(player) {
@@ -127,6 +140,7 @@ export function rebalanceTables(game, now = Date.now(), expectedPlan = null) {
   const next = structuredClone(game);
   advanceClock(next,now);
   next.seatingManaged = true;
+  next.openTables = plan.tables.map(t => t.table);
   for (const player of next.players) {
     if (!player.active) { vacateSeat(player); continue; }
     const seat = plan.assignments.find(p => p.playerId === player.id);
@@ -253,20 +267,39 @@ export function validateConfig(c) {
 export function poolOf(game) { return game.players.reduce((sum, p) => sum + (game.config.mode === 'cash' ? p.invested : p.mainContribution ?? p.invested), 0); }
 export function bountyPoolOf(game) { return game.players.reduce((sum,p)=>sum+(p.bountyPaid||0),0); }
 export function normalizeGame(game) {
+  game.id ||= crypto.randomUUID();
   game.config = { ...defaults(), ...game.config };
   delete game.config.addonLimit;
   game.freezeout ??= null;
   game.finishedAt ??= null;
   game.completionReason ??= game.finished ? 'recorded' : null;
-  if (game.players.some(p => (!game.seatingManaged || p.active) && (!Number.isInteger(p.table) || p.table < 1))) {
-    game.players = seatPlayers(game.players, game.config.tableCapacity);
+  // Migrate missing seats individually: an eliminated participant must never
+  // trigger a new seating plan for players who are still at the table.
+  const legacySeats = seatPlayers(game.players, game.config.tableCapacity);
+  const occupied = new Set();
+  const needsSeat = [];
+  const holdsSeat = p => game.config.mode === 'cash' || p.active;
+  for (const p of game.players.filter(holdsSeat)) {
+    const key = `${p.table}:${p.seat}`;
+    if (Number.isInteger(p.table) && p.table > 0 && Number.isInteger(p.seat) && p.seat > 0 && p.seat <= game.config.tableCapacity && !occupied.has(key)) occupied.add(key);
+    else needsSeat.push(p);
   }
+  for (const p of needsSeat) {
+    const legacy = legacySeats[game.players.indexOf(p)];
+    let table = legacy?.table || 1, seat = legacy?.seat || 1;
+    if (occupied.has(`${table}:${seat}`)) {
+      table = 1; seat = 1;
+      while (occupied.has(`${table}:${seat}`)) { if (++seat > game.config.tableCapacity) { table++; seat = 1; } }
+    }
+    Object.assign(p, {table,seat}); occupied.add(`${table}:${seat}`);
+  }
+  game.openTables = gameTableNumbers(game);
   game.eliminationOrder ||= game.players.filter(p=>p.place>1).sort((a,b)=>b.place-a.place).map(p=>p.id);
   game.events ||= [];
   for (const p of game.players) {
     p.mainContribution ??= p.invested; p.bountyPaid ??= 0; p.bounty ??= 0; p.earnedBounty ??= 0;
     p.knockouts ??= 0; p.rebuys ??= p.entries-1; p.reentries ??= 0; p.addons ??= 0;
-    if (game.seatingManaged && !p.active) vacateSeat(p);
+    if (game.config.mode === 'tournament' && !p.active) vacateSeat(p);
   }
   return game;
 }
@@ -282,8 +315,10 @@ export function createGame(config, levels, players, now = Date.now()) {
     if (error) throw new Error(error);
   }
   return {
+    id: crypto.randomUUID(), startedAt: now,
     config: structuredClone(config), levels: structuredClone(levels),
     players: seatPlayers(players, config.tableCapacity).map(p => firstEntry(config, p)),
+    openTables: seatingPlan(players.length, config.tableCapacity).map((_,i) => i+1),
     index: 0, remaining: levels[0].duration, elapsed: 0, running: false,
     deadline: null, lastTick: now, finished: false, structureEnded: false,
     eliminationOrder: [], events: [], winnerBounty: null, freezeout: null, finishedAt: null, completionReason: null,
@@ -292,14 +327,19 @@ export function createGame(config, levels, players, now = Date.now()) {
 
 export const playerNameKey = name => String(name ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
 
+export function registeredPlayer(game, profile) {
+  return game.players.find(p => p.id === profile.id ||
+    playerNameKey(p.name || p.nick) === playerNameKey(profile.name || profile.nick) ||
+    (playerNameKey(profile.nick) && playerNameKey(p.nick) === playerNameKey(profile.nick)));
+}
+
 export function registrationTables(game) {
   const capacity = game.config.tableCapacity;
   const numbers = gameTableNumbers(game);
   const next = Math.max(0, ...numbers) + 1;
   return [...numbers, next].map(table => ({
     table, isNew: table === next,
-    // Before the first redistribution, preserve the original re-entry seats.
-    seats: Array.from({length:capacity}, (_,i) => i+1).filter(seat => !game.players.some(p => (!game.seatingManaged || p.active) && p.table === table && p.seat === seat)),
+    seats: Array.from({length:capacity}, (_,i) => i+1).filter(seat => !game.players.some(p => (game.config.mode === 'cash' || p.active) && p.table === table && p.seat === seat)),
   }));
 }
 
@@ -311,7 +351,7 @@ export function registerPlayer(game, profile, placement = null, now = Date.now()
   const profileError = validateProfile({ name, nick });
   if (profileError) throw new Error(profileError);
   if (typeof profile?.id !== 'string' || !profile.id.trim()) throw new Error('Не указан идентификатор игрока');
-  if (game.players.some(p => p.id === profile.id || playerNameKey(p.name || p.nick) === playerNameKey(name || nick))) {
+  if (registeredPlayer(game, {id:profile.id,name,nick})) {
     throw new Error(game.config.mode === 'cash' ? 'Этот игрок уже зарегистрирован. Добавьте вход в его карточке.' : 'Этот игрок уже зарегистрирован. Для возвращения используйте ре-энтри в его карточке.');
   }
   const tables = registrationTables(game);
@@ -323,6 +363,7 @@ export function registerPlayer(game, profile, placement = null, now = Date.now()
   advanceClock(game, now);
   const player = firstEntry(game.config, { id:profile.id, name, nick, table, seat });
   game.players.push(player);
+  game.openTables = gameTableNumbers(game);
   game.config.seats = game.players.length;
   if (game.config.mode === 'tournament') updatePlaces(game);
   recordEvent(game, { type:'registration', playerId:player.id, amount:player.invested, bounty:player.bountyPaid, chips:game.config.stack, table, seat }, now);
@@ -409,7 +450,7 @@ export function rememberAction(state, snapshot = state.game, kind = 'operation')
   const history = actionHistory(state);
   history.push({ game: structuredClone(snapshot), kind });
   if (history.length > MAX_UNDO_STEPS) history.splice(0, history.length - MAX_UNDO_STEPS);
-  // Leave room below the server's 1 MiB limit, including large player libraries.
+  // Bound undo memory independently of the larger limit for long event logs.
   while (history.length && new TextEncoder().encode(JSON.stringify(state)).byteLength > HISTORY_STATE_BYTES) history.shift();
 }
 
@@ -461,8 +502,9 @@ export function eliminate(game, id, now = Date.now(), killerId = null, { allowOt
     recordEvent(game, {type:'knockout',playerId:id,killerId,amount:immediate,carried:player.bounty-immediate},now);
     player.bounty=0;
   } else recordEvent(game,{type:'knockout',playerId:id,killerId:null,amount:0,carried:0},now);
+  game.openTables = gameTableNumbers(game);
   player.active = false;
-  if (game.seatingManaged) vacateSeat(player);
+  vacateSeat(player);
   game.eliminationOrder.push(id);
   updatePlaces(game);
   const alive = game.players.filter(p => p.active);
@@ -486,7 +528,6 @@ function updatePlaces(game) {
 }
 function recordEvent(game,event,now=Date.now()) {
   game.events.push({...event,at:now});
-  if(game.events.length>200)game.events.shift();
 }
 export function addEntry(game,id,type,now=Date.now()) {
   const p=game.players.find(p=>p.id===id);
@@ -496,7 +537,7 @@ export function addEntry(game,id,type,now=Date.now()) {
     if(p.active || !game.config.reentry)throw new Error('Ре-энтри недоступен');
   } else if(!p.active || game.finished || type!=='addon')throw new Error('Докупка недоступна');
   let placement;
-  if (type === 'reentry' && game.seatingManaged) {
+  if (type === 'reentry') {
     const tables = registrationTables(game);
     const table = tables.filter(t => t.seats.length && !t.isNew).sort((a,b) => b.seats.length-a.seats.length || a.table-b.table)[0] || tables.at(-1);
     placement = {table:table.table,seat:table.seats[0]};
@@ -518,6 +559,7 @@ export function addEntry(game,id,type,now=Date.now()) {
     }
     p.active=true;p.reentries++;p.entries++;
     if (placement) Object.assign(p,placement);
+    game.openTables = gameTableNumbers(game);
     game.eliminationOrder=game.eliminationOrder.filter(x=>x!==id);
     game.finished=false;
     game.finishedAt=null;game.completionReason=null;
