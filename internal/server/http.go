@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"mime"
@@ -61,14 +62,15 @@ func (s *store) api(w http.ResponseWriter, r *http.Request) {
 			respond(w, http.StatusConflict, map[string]any{"error": "State changed in another client", "revision": s.data.Revision})
 			return
 		}
-		if err := s.archiveTransition(next.State); err != nil {
+		rollbackArchive, err := s.archiveTransition(next.State)
+		if err != nil {
 			log.Printf("archive game: %v", err)
 			respond(w, http.StatusInternalServerError, map[string]string{"error": "Could not archive game; current game was kept"})
 			return
 		}
 		next.Revision++
 		if err := s.write(next); err != nil {
-			log.Printf("save state: %v", err)
+			log.Printf("save state: %v", errors.Join(err, rollbackArchive()))
 			respond(w, http.StatusInternalServerError, map[string]string{"error": "Could not save game"})
 			return
 		}

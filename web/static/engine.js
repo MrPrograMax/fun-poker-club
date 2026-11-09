@@ -568,6 +568,31 @@ export function addEntry(game,id,type,now=Date.now()) {
   recordEvent(game,{type,playerId:id,amount,bounty,chips:type==='addon'?game.config.addonStack:game.config.stack},now);
 }
 
+export function addCashEntry(game, id, amount, now = Date.now()) {
+  const player = game.players.find(p => p.id === id);
+  if (game.config.mode !== 'cash' || game.finished || !player?.active) throw new Error('Вход сейчас недоступен');
+  if (!Number.isSafeInteger(amount) || amount < 1 || amount > 10000000) throw new Error('Сумма входа: от 1 до 10 000 000');
+  if (!Number.isSafeInteger(poolOf(game) + amount)) throw new Error('Слишком большая сумма входов');
+  advanceClock(game, now);
+  player.invested += amount;
+  player.entries++;
+  recordEvent(game, {type:'cashin', playerId:id, amount}, now);
+}
+
+export function cashOut(game, id, amount, now = Date.now()) {
+  const player = game.players.find(p => p.id === id);
+  if (game.config.mode !== 'cash' || game.finished || !player?.active) throw new Error('Выход сейчас недоступен');
+  const available = poolOf(game) - game.players.reduce((sum,p) => sum + (p.cashout ?? 0), 0);
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Сумма выхода должна быть целым неотрицательным числом');
+  if (amount > available) throw new Error('Выход превышает сумму, оставшуюся за столом');
+  if (game.players.filter(p => p.active).length === 1 && amount !== available) throw new Error(`Последний игрок должен вывести оставшиеся ${available}`);
+  advanceClock(game, now);
+  player.cashout = amount;
+  player.active = false;
+  recordEvent(game, {type:'cashout', playerId:id, amount}, now);
+  if (game.players.every(p => !p.active)) finishGame(game, now);
+}
+
 export function formatTime(seconds, hours = false) {
   const value = Math.max(0, Math.ceil(seconds));
   const h = Math.floor(value / 3600);

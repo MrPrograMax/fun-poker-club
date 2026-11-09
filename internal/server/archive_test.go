@@ -146,3 +146,54 @@ func TestLegacyGameReceivesIDWithoutDuplicatingArchive(t *testing.T) {
 		t.Fatalf("migration created duplicates: %s", r.Body.String())
 	}
 }
+
+func TestStateWriteFailureDoesNotPublishArchive(t *testing.T) {
+	for _, alreadyArchived := range []bool{false, true} {
+		t.Run(fmt.Sprint(alreadyArchived), func(t *testing.T) {
+			s := testStore(t)
+			putArchiveState(t, s, archiveState("match", alreadyArchived, 1))
+			before := s.data
+			archiveBefore, _ := os.ReadFile(s.archivePath("match"))
+			// Fail the final rename while leaving the archive directory writable.
+			if err := os.Rename(s.path, s.path+".backup"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(s.path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(`{"revision":%d,"state":%s}`, s.data.Revision, archiveState("match", true, 9))
+			if got := request(handler(s), "PUT", "/api/state", body, "").Code; got != 500 {
+				t.Fatalf("got %d", got)
+			}
+			if string(s.data.State) != string(before.State) || s.data.Revision != before.Revision {
+				t.Fatal("failed save changed current state")
+			}
+			archiveAfter, err := os.ReadFile(s.archivePath("match"))
+			if alreadyArchived {
+				if err != nil || string(archiveBefore) != string(archiveAfter) {
+					t.Fatal("failed save changed archived result")
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatal("failed save published an uncommitted archive")
+			}
+		})
+	}
+}
+
+func TestPartialArchiveFailureRollsBackEarlierWrites(t *testing.T) {
+	s := testStore(t)
+	putArchiveState(t, s, archiveState("previous", false, 1))
+	if err := os.MkdirAll(s.archivePath("next"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"revision":%d,"state":%s}`, s.data.Revision, archiveState("next", true, 2))
+	if got := request(handler(s), "PUT", "/api/state", body, "").Code; got != 500 {
+		t.Fatal(got)
+	}
+	if _, err := os.Stat(s.archivePath("previous")); !os.IsNotExist(err) {
+		t.Fatal("partial archive transition was not rolled back")
+	}
+	if s.data.Revision != 1 {
+		t.Fatal("failed transition changed revision")
+	}
+}

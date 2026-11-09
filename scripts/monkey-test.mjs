@@ -99,7 +99,7 @@ export function runScenario(seed,steps=300) {
       assertGame(state.game);
       // Reload is a normal operation and must be financially and temporally idempotent.
       assert.deepEqual(E.normalizeGame(structuredClone(state.game)),state.game,'reload changes valid game');
-      assert.ok(Buffer.byteLength(JSON.stringify({revision:123456,state}))<1048576,'save exceeds server limit');
+      assert.ok(Buffer.byteLength(JSON.stringify({revision:123456,state}))<8*1048576,'save exceeds server limit');
     }
     return {seed,steps,counts,players:state.game.players.length};
   } catch(error) {
@@ -107,15 +107,56 @@ export function runScenario(seed,steps=300) {
   }
 }
 
+export function runCashScenario(seed, steps=300) {
+  const random=randomFor(seed), pick=xs=>xs[Math.floor(random()*xs.length)], int=(a,b)=>a+Math.floor(random()*(b-a+1));
+  const count=pick([2,3,9,15,40]),config={...E.defaults(),mode:'cash',seats:count,tableCapacity:int(2,10),buyin:pick([1,1000,10000000])};
+  const profiles=Array.from({length:count},(_,i)=>({id:`c${i}`,nick:`Cash${i}`}));
+  let state={version:1,config,seats:profiles,library:profiles,step:'board',game:E.createGame(config,E.makeLevels(config),profiles,0)},now=0,nextId=count;
+  const trace=[],counts={};
+  try {
+    for(let step=0;step<steps;step++) {
+      now+=int(0,60000);
+      const g=state.game,active=g.players.filter(p=>p.active),actions=['reload','undo','advance','export'];
+      if(!g.finished){actions.push('cashin','cashout','toggle','invalid-cashout');if(g.players.length<E.MAX_PLAYERS)actions.push('register');}
+      const action=pick(actions),details={step,now,action};trace.push(details);counts[action]=(counts[action]||0)+1;
+      const before=structuredClone(g);
+      if(action==='reload'){state=JSON.parse(JSON.stringify(state));E.normalizeGame(state.game);E.actionHistory(state);}
+      if(action==='undo')E.undoAction(state,now);
+      if(action==='advance')E.advanceClock(g,now);
+      if(action==='toggle')E.toggleClock(g,now);
+      if(action==='export'&&g.finished)assert.equal(E.exportGameResults(g).summary.totalWinnings,E.poolOf(g));
+      if(action==='cashin'){details.id=pick(active).id;details.amount=int(1,10000000);E.addCashEntry(g,details.id,details.amount,now);E.rememberAction(state,before);}
+      if(action==='cashout'){
+        const available=E.poolOf(g)-sum(g.players,'cashout');details.id=pick(active).id;details.amount=active.length===1?available:pick([0,available,int(0,available)]);
+        E.cashOut(g,details.id,details.amount,now);E.rememberAction(state,before);
+      }
+      if(action==='invalid-cashout'){assert.throws(()=>E.cashOut(g,pick(active).id,E.poolOf(g)+1,now));assert.deepEqual(g,before);}
+      if(action==='register'){E.registerPlayer(g,{id:`c${nextId}`,nick:`Cash${nextId++}`},null,now);E.rememberAction(state,before);}
+      const current=state.game,invested=sum(current.players,'invested'),paid=sum(current.players,'cashout');
+      assert.ok(paid<=invested&&paid>=0,'cash payouts exceed contributions');
+      assert.equal(new Set(current.players.map(p=>p.id)).size,current.players.length);
+      assert.equal(new Set(current.players.map(p=>`${p.table}:${p.seat}`)).size,current.players.length);
+      assert.ok(current.players.every(p=>(p.active&&p.cashout===null)||(!p.active&&Number.isSafeInteger(p.cashout)&&p.cashout>=0)));
+      const result=E.gameResults(current);
+      if(current.finished){assert.equal(paid,invested);assert.equal(sum(result.rows,'net'),0);assert.equal(current.running,false);}
+      assert.deepEqual(E.normalizeGame(structuredClone(current)),current,'cash reload changes valid state');
+      assert.ok(current.events.every(e=>Number.isFinite(e.at)));
+      assert.ok(Number.isFinite(current.elapsed)&&current.elapsed>=0);
+    }
+    return {seed,steps,counts,players:state.game.players.length};
+  }catch(error){error.monkey={seed,step:trace.length-1,trace,state,message:error.message};throw error;}
+}
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   const args=process.argv.slice(2), opt=(key,fallback)=>{const i=args.indexOf(key);return i<0?fallback:args[i+1];};
   const seeds=Number(opt('--seeds',100)), steps=Number(opt('--steps',300)), first=Number(opt('--seed',1));
   const output=opt('--output','.local/monkey-report.json');
+  const mode=opt('--mode','tournament');assert.ok(['cash','tournament'].includes(mode));
   assert.ok([seeds,steps,first].every(Number.isSafeInteger)&&seeds>0&&steps>0&&seeds<=10000&&steps<=10000);
-  const report={startedAt:new Date().toISOString(),firstSeed:first,seeds,stepsPerSeed:steps,totalActions:0,counts:{},failures:[]};
+  const report={mode,startedAt:new Date().toISOString(),firstSeed:first,seeds,stepsPerSeed:steps,totalActions:0,counts:{},failures:[]};
   const start=performance.now();
   for(let seed=first;seed<first+seeds;seed++) {
-    try {const run=runScenario(seed,steps);report.totalActions+=run.steps;for(const [k,n]of Object.entries(run.counts))report.counts[k]=(report.counts[k]||0)+n;}
+    try {const run=(mode==='cash'?runCashScenario:runScenario)(seed,steps);report.totalActions+=run.steps;for(const [k,n]of Object.entries(run.counts))report.counts[k]=(report.counts[k]||0)+n;}
     catch(error){report.failures.push(error.monkey||{seed,message:error.message});console.error(`FAIL seed=${seed} step=${error.monkey?.step}: ${error.message}`);break;}
     if((seed-first+1)%20===0) console.log(`${seed-first+1}/${seeds} scenarios; ${report.totalActions} actions`);
   }

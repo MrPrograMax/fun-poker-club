@@ -75,10 +75,11 @@ sh -n start.sh start.command
 
 ```sh
 npm run test:monkey -- --seeds 100 --steps 300 --seed 1
+npm run test:monkey -- --mode cash --seeds 100 --steps 500 --seed 20261109
 npm run test:api-stress
 ```
 
-HTTP-прогон запускает отдельный сервер на свободном loopback-порту с временным хранилищем. Методика и результаты исходного прогона — в [отчёте](stress-test-2026-11-08.md).
+HTTP-прогон запускает отдельный сервер на свободном loopback-порту с временным хранилищем. Методика и результаты — в отчётах за [8 ноября](stress-test-2026-11-08.md) и [9 ноября](stress-test-2026-11-09.md).
 
 ## Готовые сборки
 

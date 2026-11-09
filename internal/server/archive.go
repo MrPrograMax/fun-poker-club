@@ -93,7 +93,53 @@ func (s *store) saveArchive(raw json.RawMessage) error {
 	}
 	return writeAtomic(path, data)
 }
-func (s *store) archiveTransition(next json.RawMessage) error {
+func (s *store) archiveTransition(next json.RawMessage) (rollback func() error, err error) {
+	type change struct {
+		path     string
+		previous []byte
+		existed  bool
+	}
+	var changes []change
+	rollback = func() error {
+		var failures []error
+		for i := len(changes) - 1; i >= 0; i-- {
+			c := changes[i]
+			var restoreErr error
+			if c.existed {
+				restoreErr = writeAtomic(c.path, c.previous)
+			} else {
+				restoreErr = os.Remove(c.path)
+				if errors.Is(restoreErr, os.ErrNotExist) {
+					restoreErr = nil
+				}
+			}
+			failures = append(failures, restoreErr)
+		}
+		return errors.Join(failures...)
+	}
+	// Archive and current-state writes are separate files. Undo successful archive
+	// writes if a later write fails, so readers never see an uncommitted result.
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, rollback())
+		}
+	}()
+	save := func(raw json.RawMessage) error {
+		entry, err := describeArchive(raw)
+		if err != nil {
+			return err
+		}
+		path := s.archivePath(entry.ID)
+		previous, readErr := os.ReadFile(path)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return readErr
+		}
+		if err := s.saveArchive(raw); err != nil {
+			return err
+		}
+		changes = append(changes, change{path: path, previous: previous, existed: readErr == nil})
+		return nil
+	}
 	previousGame, nextGame := gameFromState(s.data.State), gameFromState(next)
 	if len(previousGame) > 0 {
 		previous, err := describeArchive(previousGame)
@@ -105,8 +151,8 @@ func (s *store) archiveTransition(next json.RawMessage) error {
 			nextEntry, nextErr := describeArchive(nextGame)
 			// Loading a pre-archive save assigns its first ID without creating a second match.
 			if nextErr != nil || (identity.ID != "" && previous.ID != nextEntry.ID) {
-				if err := s.saveArchive(previousGame); err != nil {
-					return err
+				if err := save(previousGame); err != nil {
+					return rollback, err
 				}
 			}
 		}
@@ -114,15 +160,15 @@ func (s *store) archiveTransition(next json.RawMessage) error {
 	if len(nextGame) > 0 {
 		entry, err := describeArchive(nextGame)
 		if err != nil {
-			return err
+			return rollback, err
 		}
 		_, statErr := os.Stat(s.archivePath(entry.ID))
 		// Undo or reentry updates the same match instead of leaving stale winnings in its archive.
 		if entry.Finished || statErr == nil {
-			return s.saveArchive(nextGame)
+			return rollback, save(nextGame)
 		}
 	}
-	return nil
+	return rollback, nil
 }
 func (s *store) archives(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
