@@ -702,9 +702,9 @@ export function gameResults(game) {
 export function exportGameResults(game) {
   if (!game.finished) throw new Error('Выгрузка доступна после завершения игры');
   const result = gameResults(game), cash = game.config.mode === 'cash';
-  // Export an explicit set of fields: profiles and event history stay in the app.
+  // Keep names and nicknames distinct; absent values must not become invented identities.
   return {
-    schemaVersion: 1, mode: game.config.mode, currency: 'RUB',
+    schemaVersion: 2, mode: game.config.mode, currency: 'RUB',
     bountyMode: cash ? 'off' : game.config.bountyMode,
     finishedAt: game.finishedAt == null ? null : new Date(game.finishedAt).toISOString(),
     durationSeconds: Math.floor(game.elapsed / 1000),
@@ -714,7 +714,7 @@ export function exportGameResults(game) {
       unassignedPrize: result.unassignedPrize, unclaimedBounties: result.liveBounties,
     },
     players: result.rows.map(p => ({
-      nick: p.nick?.trim() || `Игрок ${game.players.findIndex(player => player.id === p.id) + 1}`,
+      name: p.name?.trim() || null, nick: p.nick?.trim() || null,
       place: p.place ?? null, invested: p.invested, entries: p.entries,
       reentries: p.reentries, addons: p.addons,
       extraBuyins: cash ? Math.max(0, p.entries - 1) : (p.rebuys || 0),

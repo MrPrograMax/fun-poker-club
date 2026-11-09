@@ -169,22 +169,46 @@ test('cash final results use only recorded cashouts',()=>{
   const r=gameResults(g);assert.equal(r.unassignedPrize,0);assert.equal(r.rows.reduce((n,p)=>n+p.net,0),0);assert.equal(r.rows[0].net,500);
 });
 
-test('result export keeps money and counters after reentry and addons without exposing profiles',()=>{
+test('result export keeps player names, nicknames, money and counters after reentry and addons',()=>{
   const g=game({bountyMode:'progressive'});
   eliminate(g,'c',1,'a');addEntry(g,'c','reentry',2);addEntry(g,'a','addon',3);
   eliminate(g,'c',4,'b');eliminate(g,'b',5,'a');
   g.players[0].email='private@example.test';g.events.push({text:'Private event content'});
   const before=structuredClone(g), exported=JSON.parse(JSON.stringify(exportGameResults(g)));
   assert.deepEqual(g,before);
-  assert.deepEqual(exported.players.map(p=>[p.nick,p.place,p.invested,p.reentries,p.addons,p.knockouts,p.totalWinnings,p.netResult]),[
-    ['Fox22',1,1500,0,1,2,2550,1050],['Игрок 2',2,1000,0,0,1,1210,210],['Ace',3,2000,1,0,0,740,-1260],
+  assert.equal(exported.schemaVersion,2);
+  assert.deepEqual(exported.players.map(p=>[p.name,p.nick,p.place,p.invested,p.reentries,p.addons,p.knockouts,p.totalWinnings,p.netResult]),[
+    ['Анна','Fox22',1,1500,0,1,2,2550,1050],['Максим',null,2,1000,0,0,1,1210,210],['Мария','Ace',3,2000,1,0,0,740,-1260],
   ]);
   assert.equal(exported.summary.invested,4500);assert.equal(exported.summary.totalWinnings,4500);
   assert.equal(exported.players.reduce((n,p)=>n+p.netResult,0),0);
   assert.equal(exported.finishedAt,'1970-01-01T00:00:00.005Z');assert.equal(exported.currency,'RUB');
   const json=JSON.stringify(exported);
-  for(const privateValue of ['Анна','Максим','Мария','private@example.test','Private event content'])assert.ok(!json.includes(privateValue));
-  for(const player of exported.players)for(const key of ['id','name','table','seat','email','events'])assert.ok(!(key in player));
+  for(const privateValue of ['private@example.test','Private event content'])assert.ok(!json.includes(privateValue));
+  for(const player of exported.players)for(const key of ['id','table','seat','email','events'])assert.ok(!(key in player));
+});
+test('exports preserve identities from saved games when results reorder players and some profiles have no nickname or name',()=>{
+  for(const mode of ['tournament','cash']) {
+    const config={...defaults(),mode,seats:3};
+    const profiles=[
+      {id:'a',name:'  Анна-Мария Иванова  ',nick:'  Fox22  '},
+      {id:'b',name:'Максим Петров'},
+      {id:'c',nick:'777'},
+    ];
+    const g=createGame(config,makeLevels(config),profiles,0);
+    if(mode==='cash') {
+      [500,2000,500].forEach((amount,i)=>{g.players[i].cashout=amount;g.players[i].active=false;});
+      finishGame(g,2);
+    } else {eliminate(g,'a',1);eliminate(g,'c',2);}
+    const saved=normalizeGame(JSON.parse(JSON.stringify(g))),before=structuredClone(saved);
+    const exported=JSON.parse(JSON.stringify(exportGameResults(saved)));
+    assert.equal(exported.players[0].name,'Максим Петров');
+    assert.equal(exported.players[0].nick,null);
+    assert.deepEqual(exported.players.map(p=>[p.name,p.nick]).sort(),[
+      ['Анна-Мария Иванова','Fox22'],['Максим Петров',null],[null,'777'],
+    ].sort());
+    assert.deepEqual(saved,before);
+  }
 });
 test('result export preserves unknown results and does not invent knockout stats without bounty',()=>{
   const g=game();assert.throws(()=>exportGameResults(g),/завершения/);
