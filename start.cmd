@@ -1,6 +1,7 @@
 @echo off
 setlocal
 pushd "%~dp0" || exit /b 1
+if not defined DATA_DIR set "DATA_DIR=%CD%\data"
 
 if exist "until-morning.exe" goto bundled
 if not exist "go.mod" goto missing

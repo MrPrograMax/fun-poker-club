@@ -13,4 +13,4 @@ COPY --from=build /until-morning /until-morning
 ENV LISTEN_ADDR=0.0.0.0:8080 DATA_DIR=/data
 EXPOSE 8080
 VOLUME ["/data"]
-ENTRYPOINT ["/until-morning"]
+ENTRYPOINT ["/until-morning", "-open-browser=false"]

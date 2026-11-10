@@ -8,7 +8,7 @@ import {randomFor} from './monkey-test.mjs';
 
 const binary=resolve(process.argv[2]||'.local/until-morning-monkey');
 const dir=await mkdtemp(join(tmpdir(),'until-morning-api-monkey-'));
-const child=spawn(binary,[],{env:{...process.env,LISTEN_ADDR:'127.0.0.1:0',DATA_DIR:dir},stdio:['ignore','ignore','pipe']});
+const child=spawn(binary,['-open-browser=false'],{env:{...process.env,LISTEN_ADDR:'127.0.0.1:0',DATA_DIR:dir},stdio:['ignore','ignore','pipe']});
 let logs='';child.stderr.on('data',data=>{logs+=data.toString();});
 const base=await new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>reject(new Error('Server startup timeout')),10000);

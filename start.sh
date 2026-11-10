@@ -4,6 +4,10 @@ set -eu
 # Resolve files and saved games relative to this launcher, even when opened elsewhere.
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$APP_DIR"
+if [ -z "${DATA_DIR:-}" ]; then
+  DATA_DIR="$APP_DIR/data"
+  export DATA_DIR
+fi
 
 if [ -f ./until-morning ]; then
   APP_BINARY=./until-morning

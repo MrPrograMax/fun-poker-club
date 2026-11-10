@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -41,6 +42,12 @@ Go, Docker и Node.js не нужны. Интерфейс встроен в пр
 '''
 
 
+def write_checksums(output):
+    files = sorted(path for path in output.iterdir() if path.is_file() and path.name != 'SHA256SUMS.txt')
+    (output / 'SHA256SUMS.txt').write_text(''.join(
+        f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files), encoding='utf-8')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('version', help='Release tag, e.g. v0.1.0')
@@ -50,7 +57,6 @@ def main():
         parser.error('Use a version like v0.1.0 or v0.1.0-beta.1')
     output = ROOT / 'build' / 'releases' / args.version
     output.mkdir(parents=True, exist_ok=True)
-    checksums = []
     for target in args.target or TARGETS:
         goos, goarch = TARGETS[target]
         name = f'until-morning-{args.version}-{target}'
@@ -62,6 +68,9 @@ def main():
             print(f'Building {target}...', flush=True)
             subprocess.run(['go', 'build', '-trimpath', '-ldflags=-s -w', '-o', str(binary), './cmd/until-morning'], cwd=ROOT, env=env, check=True)
             binary.chmod(0o755)
+            if goos in ('windows', 'linux'):
+                direct = output / (name + ('.exe' if goos == 'windows' else '.run'))
+                shutil.copy2(binary, direct)
             launchers = ['start.cmd'] if goos == 'windows' else ['start.sh']
             if goos == 'darwin':
                 launchers.append('start.command')
@@ -75,8 +84,7 @@ def main():
             with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as package:
                 for path in sorted(folder.iterdir()):
                     package.write(path, f'{name}/{path.name}')
-            checksums.append(f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}')
-    (output / 'SHA256SUMS.txt').write_text('\n'.join(checksums) + '\n', encoding='utf-8')
+    write_checksums(output)
     print(f'Release files: {output}')
 
 
